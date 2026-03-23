@@ -1,0 +1,42 @@
+export const READ_HEAVY_ACTIONS = new Set<string>([
+  "getInitialData",
+  "getDashboard",
+  "getHallBookings",
+  "getFutureBookings",
+  "getFutureHallBookings",
+  "getVisitors",
+  "getSubs",
+  "getTamkeen",
+  "getArchive"
+]);
+
+export const MUTATING_ACTIONS = new Set<string>([
+  "checkin",
+  "checkout",
+  "updateVisitor",
+  "freezeTime",
+  "unfreezeTime",
+  "updatePayment",
+  "addFutureBooking",
+  "checkinFromFuture",
+  "cancelFutureBooking",
+  "updateFutureBooking",
+  "addSub",
+  "subCheckin",
+  "subCheckout",
+  "updateSub",
+  "updateSubVisitorTimes",
+  "addBooking",
+  "updateRoom",
+  "deleteRoom",
+  "deleteBooking",
+  "tamkeenCheckin",
+  "tamkeenCheckout",
+  "updateTamkeen",
+  "updateTamkeenAttendance",
+  "freezeTamkeenTime",
+  "unfreezeTamkeenTime",
+  "social_checkin",
+  "social_addFuture",
+  "social_addBooking"
+]);

@@ -1,0 +1,362 @@
+// ═══════════════════════════════════════════════════════════════
+// Auth_Code.gs — Space Noon — رابط موحّد، توجيه حسب الدور
+// ═══════════════════════════════════════════════════════════════
+
+var AUTH_USERS_SHEET = 'المستخدمون';
+
+function doGet(e) {
+  _initUsersSheet();
+  return HtmlService.createTemplateFromFile('Login')
+    .evaluate()
+    .setTitle('Space Noon — دخول')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function include(f) {
+  return HtmlService.createHtmlOutputFromFile(f).getContent();
+}
+
+function _initUsersSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var s  = ss.getSheetByName(AUTH_USERS_SHEET);
+  if (!s) {
+    s = ss.insertSheet(AUTH_USERS_SHEET);
+    s.getRange(1,1,1,3).setValues([['الاسم','الدور','نشط']])
+     .setBackground('#1e3a8a').setFontColor('#fff').setFontWeight('bold');
+    s.getRange(2,1,5,3).setValues([
+      ['hazem','admin','نعم'],['reem','admin','نعم'],
+      ['samar','admin','نعم'],['alaa','admin','نعم'],
+      ['sara','social','نعم']
+    ]);
+  }
+  return s;
+}
+
+function loginByName(name) {
+  if (!name || !name.trim()) return { success: false, error: 'أدخل اسمك' };
+  var s = _initUsersSheet(), lr = s.getLastRow();
+  if (lr < 2) return { success: false, error: 'لا يوجد مستخدمون' };
+  var rows = s.getRange(2, 1, lr - 1, 3).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    var rName = String(rows[i][0]||'').trim().toLowerCase();
+    var rRole = String(rows[i][1]||'admin').trim().toLowerCase();
+    var rActive = String(rows[i][2]||'').trim();
+    if (rName !== name.trim().toLowerCase()) continue;
+    if (rActive !== 'نعم') return { success: false, error: 'الحساب غير مفعّل' };
+    return { success: true, name: String(rows[i][0]).trim(), role: rRole };
+  }
+  return { success: false, error: 'الاسم غير موجود — تواصل مع المدير' };
+}
+
+function simpleLogin(name) { return loginByName(name); }
+function logoutUser() { return { success: true }; }
+
+function getAdminPage() {
+  return HtmlService.createTemplateFromFile('Index').evaluate().getContent();
+}
+function getSocialPage() {
+  return HtmlService.createTemplateFromFile('Social').evaluate().getContent();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// processRequest — ROUTER
+// social_* → social helpers
+// everything else → Code.gs functions (same project)
+// ═══════════════════════════════════════════════════════════════
+function processRequest(action, data) {
+  data = data || {};
+  try {
+    switch (action) {
+      // SOCIAL ACTIONS
+      case 'social_checkin':         return _socialCheckin(data);
+      case 'social_addFuture':       return addFutureBooking(data);
+      case 'social_addBooking':      return _socialAddBooking(data);
+      case 'social_getHallBookings': return _socialGetHallBookings(data);
+      case 'social_getDashboard':    return _socialGetDashboard(data);
+
+      // VISITORS
+      case 'getVisitors':             return getVisitors(data.filter);
+      case 'checkin':                 return checkinVisitor(data);
+      case 'checkout':                return checkoutVisitor(data);
+      case 'updateVisitor':           return updateVisitor(data);
+      case 'lookupByName':            return lookupByName(data.name);
+      case 'freezeTime':              return freezeVisitorTime(data);
+      case 'unfreezeTime':            return unfreezeVisitorTime(data);
+      case 'updatePayment':           return updatePayment(data);
+
+      // FUTURE BOOKINGS
+      case 'addFutureBooking':        return addFutureBooking(data);
+      case 'getFutureBookings':       return getFutureBookings();
+      case 'checkinFromFuture':       return checkinFromFuture(data);
+      case 'cancelFutureBooking':     return cancelFutureBooking(data);
+      case 'updateFutureBooking':     return updateFutureBooking(data);
+
+      // SUBSCRIPTIONS
+      case 'getSubs':                 return getSubscriptions(data.filter);
+      case 'addSub':                  return addSubscription(data);
+      case 'subCheckin':              return subCheckin(data);
+      case 'subCheckout':             return subCheckout(data);
+      case 'updateSub':               return updateSubscription(data);
+      case 'updateSubVisitorTimes':   return updateSubVisitorTimes(data);
+      case 'lookupSubByName':         return lookupSubByName(data.name);
+
+      // ROOMS
+      case 'addBooking':              return addNewBooking(data);
+      case 'getHallBookings':         return getFilteredBookings(data.period||'today');
+      case 'getFutureHallBookings':   return getFutureHallBookings();
+      case 'updateRoom':              return updateRoom(data);
+      case 'deleteRoom':              return deleteRoom(data);
+      case 'deleteBooking':           return deleteBooking(data);
+
+      // TAMKEEN
+      case 'getTamkeen':              return getTamkeenStudents(data.filter);
+      case 'tamkeenCheckin':          return tamkeenCheckinSheet(data);
+      case 'tamkeenCheckout':         return tamkeenCheckoutSheet(data);
+      case 'updateTamkeen':           return updateTamkeen(data);
+      case 'updateTamkeenAttendance': return updateTamkeenAttendance(data);
+      case 'freezeTamkeenTime':       return freezeTamkeenTime(data);
+      case 'unfreezeTamkeenTime':     return unfreezeTamkeenTime(data);
+
+      // DASHBOARD
+      case 'getDashboard':            return getDashboardData(data.period||'today');
+      case 'getInitialData':          return getInitialData();
+      case 'getOptions':              return OPTIONS;
+      case 'getArchive':              return getArchive();
+
+      default:
+        return { success: false, error: 'إجراء غير معروف: ' + action };
+    }
+  } catch(e) {
+    Logger.log('processRequest [' + action + ']: ' + e.toString());
+    return { success: false, error: e.toString() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AVAILABILITY DATA
+// ═══════════════════════════════════════════════════════════════
+function getAvailabilityData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), TOTAL = 70;
+  var activeSubs = [], hallsByDate = {};
+  var subsSheet = ss.getSheetByName('اشتراكات');
+  if (subsSheet && subsSheet.getLastRow() > 1) {
+    subsSheet.getRange(2,1,subsSheet.getLastRow()-1,19).getValues().forEach(function(r){
+      var type=String(r[4]||'').trim(), expiry=String(r[6]||'').trim(), status=String(r[14]||'').trim();
+      if((type==='أسبوعي'||type==='شهري')&&status!=='منتهي'&&expiry){
+        var p=expiry.split('-'); if(p.length===3) activeSubs.push({expiry:new Date(+p[2],+p[1]-1,+p[0])});
+      }
+    });
+  }
+  var roomsSheet = ss.getSheetByName('حجز قاعات');
+  if (roomsSheet && roomsSheet.getLastRow() > 1) {
+    roomsSheet.getRange(2,1,roomsSheet.getLastRow()-1,15).getValues().forEach(function(r){
+      var rd=r[5]; if(!rd) return;
+      var ds=rd instanceof Date?(_p2(rd.getDate())+'-'+_p2(rd.getMonth()+1)+'-'+rd.getFullYear()):String(rd).trim();
+      var m=String(r[14]||'').match(/كراسي:\s*(\d+)/);
+      hallsByDate[ds]=(hallsByDate[ds]||0)+(m?parseInt(m[1]):1);
+    });
+  }
+  var today=new Date(); today.setHours(0,0,0,0);
+  var dn=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'], days=[];
+
+  var visSheet2=ss.getSheetByName('سجل الزوار'), visRows2=[];
+  if(visSheet2&&visSheet2.getLastRow()>1)
+    visRows2=visSheet2.getRange(2,1,visSheet2.getLastRow()-1,11).getValues();
+
+  for(var i=0;i<7;i++){
+    var d=new Date(today); d.setDate(today.getDate()+i);
+    var ds=_p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();
+    var sub=activeSubs.filter(function(x){return x.expiry>=d;}).length;
+    var hall=hallsByDate[ds]||0;
+    var dayVis=0;
+    visRows2.forEach(function(rv){
+      var vd=rv[3] instanceof Date?(_p2(rv[3].getDate())+'-'+_p2(rv[3].getMonth()+1)+'-'+rv[3].getFullYear()):String(rv[3]||'').trim();
+      if(vd===ds&&String(rv[10]||'').trim()!=='برنامج تمكين إنسان') dayVis++;
+    });
+    days.push({date:ds,dayName:dn[d.getDay()],isToday:i===0,subChairs:sub,hallChairs:hall,
+      occupied:sub+hall+dayVis,available:Math.max(0,TOTAL-sub-hall-dayVis),total:TOTAL});
+  }
+
+  var visSheet=ss.getSheetByName('سجل الزوار'), liveNow=0;
+  if(visSheet&&visSheet.getLastRow()>1){
+    var todayStr=_p2(today.getDate())+'-'+_p2(today.getMonth()+1)+'-'+today.getFullYear();
+    visSheet.getRange(2,1,visSheet.getLastRow()-1,20).getValues().forEach(function(r){
+      var vd=r[3] instanceof Date?(_p2(r[3].getDate())+'-'+_p2(r[3].getMonth()+1)+'-'+r[3].getFullYear()):String(r[3]||'').trim();
+      if(vd===todayStr&&!String(r[6]||'').trim()&&String(r[10]||'').trim()!=='برنامج تمكين إنسان') liveNow++;
+    });
+  }
+  return{days:days,liveNow:liveNow,available:Math.max(0,TOTAL-liveNow),total:TOTAL};
+}
+
+
+var _p2=function(n){return String(n).padStart(2,'0');};
+var _fmtD=function(d){return _p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();};
+var _fmtT=function(d){return _p2(d.getHours())+':'+_p2(d.getMinutes())+':'+_p2(d.getSeconds());};
+var _dayName=function(d){return['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'][d.getDay()];};
+
+function _socialCheckin(data) {
+  if(!data.name||!data.phone||!data.subType||!data.pipeline)
+    return{success:false,error:'جميع الحقول مطلوبة'};
+  var phone=String(data.phone).trim();
+  if(phone.replace(/\D/g,'').length<9) return{success:false,error:'رقم الهاتف غير صحيح'};
+  var ss=SpreadsheetApp.getActiveSpreadsheet();
+  var vs=ss.getSheetByName('سجل الزوار');
+  if(!vs) return{success:false,error:'ورقة سجل الزوار غير موجودة'};
+  var now=new Date(), todayStr=_fmtD(now), timeStr=_fmtT(now);
+  var requestedDate=String(data.entryDate||data.date||'').trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)){
+    var _d=requestedDate.split('-');
+    requestedDate=_d[2]+'-'+_d[1]+'-'+_d[0];
+  }
+
+  // FIX: if social creates a future-date booking, keep it in "حجوزات مسبقة"
+  // so it won't appear in active visitors until admin clicks "دخول الآن".
+  if(requestedDate && /^\d{2}-\d{2}-\d{4}$/.test(requestedDate) && cmpDMY(requestedDate,todayStr)>0){
+    return addFutureBooking({
+      name:data.name,
+      phone:phone,
+      subType:data.subType,
+      pipeline:data.pipeline,
+      date:requestedDate,
+      cost:data.cost,
+      amountPaid:data.amountPaid,
+      amountRemaining:data.amountRemaining,
+      payType:data.payType||'',
+      account:data.account||'',
+      notes:data.notes||''
+    });
+  }
+
+  var entryTime=(data.entryTime&&/^\d{2}:\d{2}/.test(data.entryTime))
+    ?(data.entryTime.length===5?data.entryTime+':00':data.entryTime):timeStr;
+  var finalDate=(requestedDate&&/^\d{2}-\d{2}-\d{4}$/.test(requestedDate))?requestedDate:todayStr;
+  var _dp=finalDate.split('-');
+  var finalDay=_dayName(new Date(+_dp[2],+_dp[1]-1,+_dp[0]));
+  var isFirst=true, lr=vs.getLastRow();
+  if(lr>1){
+    var rows=vs.getRange(2,1,lr-1,20).getValues();
+    for(var i=0;i<rows.length;i++){
+      var rPhone=String(rows[i][2]||'').trim();
+      if(rPhone!==phone) continue;
+      isFirst=false;
+      var rDate=rows[i][3] instanceof Date?_fmtD(rows[i][3]):String(rows[i][3]||'').trim();
+      var rOut=String(rows[i][6]||'').trim();
+      if(rDate===finalDate&&!rOut&&String(rows[i][9]||'')===data.subType)
+        return{success:false,error:'هذا الزائر لا يزال داخلاً'};
+    }
+  }
+  var nid=1;
+  if(lr>1){var ids=vs.getRange(2,1,lr-1,1).getValues();ids.forEach(function(r){var v=parseInt(r[0])||0;if(v>=nid)nid=v+1;});}
+  var row=new Array(20).fill('');
+  row[0]=nid;row[1]=data.name.trim();row[2]=phone;row[3]=finalDate;row[4]=finalDay;
+  row[5]=entryTime;row[9]=data.subType;row[10]=data.pipeline;row[11]=isFirst?'نعم':'لا';
+  row[12]=parseFloat(data.cost)||0;row[15]='لا';row[16]=data.notes||'';
+  row[17]=parseFloat(data.amountPaid)||0;row[18]=parseFloat(data.amountRemaining)||0;
+  vs.getRange(lr+1,1,1,row.length).setValues([row]);
+  _authUpsertArchive(ss,data.name.trim(),phone,data.pipeline,finalDate);
+  return{success:true,rowIndex:lr+1,id:nid,isFirstVisit:isFirst,entryDate:finalDate,entryTime:entryTime};
+}
+
+function _socialAddBooking(data) {
+  if(!data.hall||!data.name||!data.date||!data.start||!data.end)
+    return{success:false,error:'يرجى تعبئة جميع الحقول المطلوبة'};
+  var chairs=parseInt(data.chairs)||0;
+  if(chairs>16) return{success:false,error:'الحد الأقصى 16 كرسي'};
+  var dateVal=String(data.date), fmtDate;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(dateVal)){var dp=dateVal.split('-');fmtDate=dp[2]+'-'+dp[1]+'-'+dp[0];}
+  else fmtDate=dateVal;
+  var sp=data.start.split(':'),ep=data.end.split(':');
+  var diff=(+ep[0]*60+ +ep[1])-(+sp[0]*60+ +sp[1]);
+  if(diff<=0) return{success:false,error:'وقت النهاية يجب أن يكون بعد البداية'};
+  var dur=Math.floor(diff/60)+'س '+(diff%60>0?diff%60+'د':'');
+  var ss=SpreadsheetApp.getActiveSpreadsheet();
+  var rs=ss.getSheetByName('حجز قاعات');
+  if(!rs) return{success:false,error:'ورقة حجز قاعات غير موجودة'};
+  var dp2=fmtDate.split('-'),rDay=_dayName(new Date(+dp2[2],+dp2[1]-1,+dp2[0]));
+  var lr=rs.getLastRow(),nid=1;
+  if(lr>1){var ids=rs.getRange(2,1,lr-1,1).getValues();ids.forEach(function(r){var v=parseInt(r[0])||0;if(v>=nid)nid=v+1;});}
+  var cost=parseFloat(data.revenue)||0,amtPaid=parseFloat(data.amountPaid)||0;
+  var amtRem=Math.max(0,cost-amtPaid),paidFlg=amtRem<=0&&cost>0?'نعم':'لا';
+  var notes=chairs?'كراسي: '+chairs+(data.notes?' '+data.notes:''):(data.notes||'');
+  var row=new Array(17).fill('');
+  row[0]=nid;row[1]=data.name.trim();row[2]=data.phone||'';row[3]=data.hall;
+  row[4]=data.pipeline||'وسائل التواصل الاجتماعي';row[5]=fmtDate;row[6]=rDay;
+  row[7]=data.start;row[8]=data.end;row[9]=dur;row[10]=cost;row[11]=data.payType||'كاش';
+  row[12]=data.account||'';row[13]=paidFlg;row[14]=notes;row[15]=amtPaid;row[16]=amtRem;
+  rs.getRange(lr+1,1,1,row.length).setValues([row]);
+  return{success:true,rowIndex:lr+1,date:fmtDate,duration:dur};
+}
+
+function _socialGetHallBookings(data) {
+  var period=data.period||'today';
+  var ss=SpreadsheetApp.getActiveSpreadsheet();
+  var rs=ss.getSheetByName('حجز قاعات');
+  if(!rs||rs.getLastRow()<=1) return [];
+  var today=new Date(); today.setHours(0,0,0,0);
+  var rows=rs.getRange(2,1,rs.getLastRow()-1,17).getValues(),result=[];
+  rows.forEach(function(row,idx){
+    var ds=row[5] instanceof Date?_fmtD(row[5]):String(row[5]||'').trim();
+    if(!ds) return;
+    var dp=ds.split('-'),rd=new Date(+dp[2],+dp[1]-1,+dp[0]); rd.setHours(0,0,0,0);
+    var inc=false;
+    if(period==='today') inc=rd.getTime()===today.getTime();
+    else if(period==='week'){var ws=new Date(today);ws.setDate(today.getDate()-6);inc=rd>=ws&&rd<=today;}
+    else inc=true;
+    if(!inc) return;
+    var st=String(row[7]||'').trim(),en=String(row[8]||'').trim();
+    var sp2=st.split(':'),ep2=en.split(':');
+    var diff=Math.max(0,(+ep2[0]*60+ +ep2[1])-(+sp2[0]*60+ +sp2[1]));
+    var m=String(row[14]||'').match(/كراسي:\s*(\d+)/);
+    result.push({rowIndex:idx+2,name:String(row[1]||'').trim(),phone:String(row[2]||'').trim(),
+      hall:String(row[3]||''),date:ds,day:String(row[6]||''),start:st.slice(0,5),end:en.slice(0,5),
+      duration:diff>0?(Math.floor(diff/60)+'س '+(diff%60>0?diff%60+'د':'')):'—',
+      chairs:m?m[1]:'',revenue:parseFloat(row[10])||0,payType:String(row[11]||''),
+      paid:String(row[13]||'').trim(),amountPaid:parseFloat(row[15])||0,amountRemaining:parseFloat(row[16])||0});
+  });
+  result.reverse(); return result;
+}
+
+function _socialGetDashboard(data) {
+  var TOTAL=70,ss=SpreadsheetApp.getActiveSpreadsheet();
+  var today=new Date(); today.setHours(0,0,0,0);
+  var todayStr=_fmtD(today),occupied=0,hallBookings=0,futureToday=0;
+  var vs=ss.getSheetByName('سجل الزوار');
+  if(vs&&vs.getLastRow()>1){
+    vs.getRange(2,1,vs.getLastRow()-1,20).getValues().forEach(function(r){
+      var vd=r[3] instanceof Date?_fmtD(r[3]):String(r[3]||'').trim();
+      if(vd===todayStr&&!String(r[6]||'').trim()&&String(r[10]||'').trim()!=='برنامج تمكين إنسان') occupied++;
+    });
+  }
+  var rs=ss.getSheetByName('حجز قاعات');
+  if(rs&&rs.getLastRow()>1){
+    rs.getRange(2,1,rs.getLastRow()-1,6).getValues().forEach(function(r){
+      var rd=r[5] instanceof Date?_fmtD(r[5]):String(r[5]||'').trim();
+      if(rd===todayStr) hallBookings++;
+    });
+  }
+  var fs=ss.getSheetByName('حجوزات مسبقة');
+  if(fs&&fs.getLastRow()>1){
+    fs.getRange(2,1,fs.getLastRow()-1,4).getValues().forEach(function(r){
+      var fd=r[3] instanceof Date?_fmtD(r[3]):String(r[3]||'').trim();
+      if(fd===todayStr) futureToday++;
+    });
+  }
+  return{success:true,availableChairs:Math.max(0,TOTAL-occupied),occupiedChairs:occupied,
+    totalChairs:TOTAL,hallBookings:hallBookings,futureToday:futureToday};
+}
+
+function _authUpsertArchive(ss,name,phone,pipeline,date){
+  try{
+    var s=ss.getSheetByName('أرشيف الزبائن'); if(!s) return;
+    var lr=s.getLastRow(),nl=name.toLowerCase();
+    if(lr>1){
+      var rows=s.getRange(2,1,lr-1,6).getValues();
+      for(var i=0;i<rows.length;i++){
+        var rn=String(rows[i][0]||'').trim().toLowerCase(),rp=String(rows[i][1]||'').trim();
+        if(rn===nl&&rp===phone){rows[i][3]=date;rows[i][4]=(parseInt(rows[i][4])||0)+1;s.getRange(i+2,1,1,6).setValues([rows[i]]);return;}
+      }
+    }
+    s.getRange(s.getLastRow()+1,1,1,6).setValues([[name,phone,date,date,1,pipeline]]);
+  }catch(e){Logger.log('_authUpsertArchive: '+e);}
+}
