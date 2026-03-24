@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════
+﻿// ═══════════════════════════════════════════════════════════════
 // Auth_Code.gs — Space Noon — رابط موحّد، توجيه حسب الدور
 // ═══════════════════════════════════════════════════════════════
 
@@ -137,59 +137,112 @@ function processRequest(action, data) {
 // AVAILABILITY DATA
 // ═══════════════════════════════════════════════════════════════
 function getAvailabilityData() {
+  var cacheKey='availability:v2', cacheTtl=30;
+  try{
+    var cached=CacheService.getScriptCache().get(cacheKey);
+    if(cached) return JSON.parse(cached);
+  }catch(e){}
+
   var ss = SpreadsheetApp.getActiveSpreadsheet(), TOTAL = 70;
-  var activeSubs = [], hallsByDate = {};
-  var subsSheet = ss.getSheetByName('اشتراكات');
+  var activeExpiries = [], hallsByDate = {}, visByDate = {};
+  var today = new Date();
+  today.setHours(0,0,0,0);
+  var todayStr = _p2(today.getDate())+'-'+_p2(today.getMonth()+1)+'-'+today.getFullYear();
+  var days = [];
+
+  var SUBS_SHEET='\u0627\u0634\u062a\u0631\u0627\u0643\u0627\u062a';
+  var ROOMS_SHEET='\u062d\u062c\u0632 \u0642\u0627\u0639\u0627\u062a';
+  var VISITORS_SHEET='\u0633\u062c\u0644 \u0627\u0644\u0632\u0648\u0627\u0631';
+  var WEEKLY='\u0623\u0633\u0628\u0648\u0639\u064a';
+  var MONTHLY='\u0634\u0647\u0631\u064a';
+  var EXPIRED='\u0645\u0646\u062a\u0647\u064a';
+  var TAMKEEN='\u0628\u0631\u0646\u0627\u0645\u062c \u062a\u0645\u0643\u064a\u0646 \u0625\u0646\u0633\u0627\u0646';
+
+  var subsSheet = ss.getSheetByName(SUBS_SHEET);
   if (subsSheet && subsSheet.getLastRow() > 1) {
-    subsSheet.getRange(2,1,subsSheet.getLastRow()-1,19).getValues().forEach(function(r){
-      var type=String(r[4]||'').trim(), expiry=String(r[6]||'').trim(), status=String(r[14]||'').trim();
-      if((type==='أسبوعي'||type==='شهري')&&status!=='منتهي'&&expiry){
-        var p=expiry.split('-'); if(p.length===3) activeSubs.push({expiry:new Date(+p[2],+p[1]-1,+p[0])});
+    var subRows = subsSheet.getRange(2,1,subsSheet.getLastRow()-1,19).getValues();
+    for (var si=0; si<subRows.length; si++) {
+      var sr = subRows[si];
+      var type = String(sr[4]||'').trim();
+      var status = String(sr[14]||'').trim();
+      if ((type!==WEEKLY && type!==MONTHLY) || status===EXPIRED) continue;
+
+      var ex = sr[6], exDate = null;
+      if (ex instanceof Date) {
+        exDate = new Date(ex.getFullYear(), ex.getMonth(), ex.getDate());
+      } else {
+        var exp = String(ex||'').trim();
+        var p = exp.split('-');
+        if (p.length===3) exDate = new Date(+p[2], +p[1]-1, +p[0]);
       }
-    });
+      if (exDate) activeExpiries.push(exDate);
+    }
   }
-  var roomsSheet = ss.getSheetByName('حجز قاعات');
+
+  var roomsSheet = ss.getSheetByName(ROOMS_SHEET);
   if (roomsSheet && roomsSheet.getLastRow() > 1) {
-    roomsSheet.getRange(2,1,roomsSheet.getLastRow()-1,15).getValues().forEach(function(r){
-      var rd=r[5]; if(!rd) return;
-      var ds=rd instanceof Date?(_p2(rd.getDate())+'-'+_p2(rd.getMonth()+1)+'-'+rd.getFullYear()):String(rd).trim();
-      var m=String(r[14]||'').match(/كراسي:\s*(\d+)/);
-      hallsByDate[ds]=(hallsByDate[ds]||0)+(m?parseInt(m[1]):1);
-    });
-  }
-  var today=new Date(); today.setHours(0,0,0,0);
-  var dn=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'], days=[];
-
-  var visSheet2=ss.getSheetByName('سجل الزوار'), visRows2=[];
-  if(visSheet2&&visSheet2.getLastRow()>1)
-    visRows2=visSheet2.getRange(2,1,visSheet2.getLastRow()-1,11).getValues();
-
-  for(var i=0;i<7;i++){
-    var d=new Date(today); d.setDate(today.getDate()+i);
-    var ds=_p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();
-    var sub=activeSubs.filter(function(x){return x.expiry>=d;}).length;
-    var hall=hallsByDate[ds]||0;
-    var dayVis=0;
-    visRows2.forEach(function(rv){
-      var vd=rv[3] instanceof Date?(_p2(rv[3].getDate())+'-'+_p2(rv[3].getMonth()+1)+'-'+rv[3].getFullYear()):String(rv[3]||'').trim();
-      if(vd===ds&&String(rv[10]||'').trim()!=='برنامج تمكين إنسان') dayVis++;
-    });
-    days.push({date:ds,dayName:dn[d.getDay()],isToday:i===0,subChairs:sub,hallChairs:hall,
-      occupied:sub+hall+dayVis,available:Math.max(0,TOTAL-sub-hall-dayVis),total:TOTAL});
+    var roomRows = roomsSheet.getRange(2,1,roomsSheet.getLastRow()-1,15).getValues();
+    for (var ri=0; ri<roomRows.length; ri++) {
+      var rr = roomRows[ri];
+      var rd = rr[5];
+      if (!rd) continue;
+      var ds = rd instanceof Date
+        ? (_p2(rd.getDate())+'-'+_p2(rd.getMonth()+1)+'-'+rd.getFullYear())
+        : String(rd).trim();
+      var m = String(rr[14]||'').match(/\u0643\u0631\u0627\u0633\u064a:\s*(\d+)/);
+      hallsByDate[ds] = (hallsByDate[ds]||0) + (m ? parseInt(m[1],10) : 1);
+    }
   }
 
-  var visSheet=ss.getSheetByName('سجل الزوار'), liveNow=0;
-  if(visSheet&&visSheet.getLastRow()>1){
-    var todayStr=_p2(today.getDate())+'-'+_p2(today.getMonth()+1)+'-'+today.getFullYear();
-    visSheet.getRange(2,1,visSheet.getLastRow()-1,20).getValues().forEach(function(r){
-      var vd=r[3] instanceof Date?(_p2(r[3].getDate())+'-'+_p2(r[3].getMonth()+1)+'-'+r[3].getFullYear()):String(r[3]||'').trim();
-      if(vd===todayStr&&!String(r[6]||'').trim()&&String(r[10]||'').trim()!=='برنامج تمكين إنسان') liveNow++;
+  var liveNow = 0;
+  var visSheet = ss.getSheetByName(VISITORS_SHEET);
+  if (visSheet && visSheet.getLastRow() > 1) {
+    var visRows = visSheet.getRange(2,1,visSheet.getLastRow()-1,20).getValues();
+    for (var vi=0; vi<visRows.length; vi++) {
+      var v = visRows[vi];
+      var vd = v[3] instanceof Date
+        ? (_p2(v[3].getDate())+'-'+_p2(v[3].getMonth()+1)+'-'+v[3].getFullYear())
+        : String(v[3]||'').trim();
+      var isTamkeen = String(v[10]||'').trim()===TAMKEEN;
+      if (!vd || isTamkeen) continue;
+
+      visByDate[vd] = (visByDate[vd]||0) + 1;
+      if (vd===todayStr && !String(v[6]||'').trim()) liveNow++;
+    }
+  }
+
+  activeExpiries.sort(function(a,b){ return a-b; });
+  var expiryIdx = 0, expiryTotal = activeExpiries.length;
+
+  for (var i=0; i<7; i++) {
+    var d = new Date(today);
+    d.setDate(today.getDate()+i);
+    while (expiryIdx<expiryTotal && activeExpiries[expiryIdx] < d) expiryIdx++;
+
+    var ds2 = _p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();
+    var sub = expiryTotal - expiryIdx;
+    var hall = hallsByDate[ds2] || 0;
+    var dayVis = visByDate[ds2] || 0;
+
+    days.push({
+      date: ds2,
+      dayName: _dayName(d),
+      isToday: i===0,
+      subChairs: sub,
+      hallChairs: hall,
+      occupied: sub + hall + dayVis,
+      available: Math.max(0, TOTAL - sub - hall - dayVis),
+      total: TOTAL
     });
   }
-  return{days:days,liveNow:liveNow,available:Math.max(0,TOTAL-liveNow),total:TOTAL};
+
+  var result = { days: days, liveNow: liveNow, available: Math.max(0, TOTAL-liveNow), total: TOTAL };
+  try {
+    var payload = JSON.stringify(result);
+    if (payload.length < 90000) CacheService.getScriptCache().put(cacheKey, payload, cacheTtl);
+  } catch(e) {}
+  return result;
 }
-
-
 var _p2=function(n){return String(n).padStart(2,'0');};
 var _fmtD=function(d){return _p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();};
 var _fmtT=function(d){return _p2(d.getHours())+':'+_p2(d.getMinutes())+':'+_p2(d.getSeconds());};
@@ -360,3 +413,4 @@ function _authUpsertArchive(ss,name,phone,pipeline,date){
     s.getRange(s.getLastRow()+1,1,1,6).setValues([[name,phone,date,date,1,pipeline]]);
   }catch(e){Logger.log('_authUpsertArchive: '+e);}
 }
+

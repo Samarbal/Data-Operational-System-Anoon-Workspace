@@ -7,6 +7,117 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <?!= include('Styles') ?>
+<script id="space-noon-bridge">
+(function () {
+  if (window.google && window.google.script && window.google.script.run) return;
+
+  function parseResponse(response) {
+    var ct = response.headers.get('content-type') || '';
+    if (ct.indexOf('application/json') !== -1) return response.json();
+    return response.text();
+  }
+
+  function mapMethod(method, args) {
+    if (method === 'processRequest') {
+      var action = encodeURIComponent(args[0] || '');
+      return { url: '/api/' + action, body: args[1] || {} };
+    }
+    if (method === 'socialProcessRequest') {
+      return { url: '/api/social', body: { action: args[0], data: args[1] || {} } };
+    }
+    if (method === 'loginByName' || method === 'simpleLogin') {
+      return { url: '/api/auth/login', body: { name: args[0] || '' } };
+    }
+    if (method === 'logoutUser') {
+      return { url: '/api/auth/logout', body: {} };
+    }
+    if (method === 'getAdminPage') {
+      return { url: '/api/auth/getAdminPage', body: {} };
+    }
+    if (method === 'getSocialPage') {
+      return { url: '/api/auth/getSocialPage', body: {} };
+    }
+    return { url: '/api/' + encodeURIComponent(method), body: args[0] || {} };
+  }
+
+  function makeRunner(successHandler, failureHandler) {
+    var runner = {};
+
+    runner.withSuccessHandler = function (fn) {
+      return makeRunner(fn, failureHandler);
+    };
+
+    runner.withFailureHandler = function (fn) {
+      return makeRunner(successHandler, fn);
+    };
+
+    function invoke(method, args) {
+      var mapped = mapMethod(method, args);
+      fetch(mapped.url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mapped.body || {})
+      })
+        .then(function (response) {
+          return parseResponse(response).then(function (payload) {
+            if (!response.ok) {
+              var msg = (payload && payload.error) ? payload.error : ('HTTP ' + response.status);
+              throw new Error(msg);
+            }
+            return payload;
+          });
+        })
+        .then(function (payload) {
+          if (typeof successHandler === 'function') successHandler(payload);
+        })
+        .catch(function (error) {
+          if (typeof failureHandler === 'function') {
+            failureHandler({ message: error && error.message ? error.message : String(error) });
+          } else {
+            console.error(error);
+          }
+        });
+    }
+
+    var methods = [
+      'processRequest',
+      'socialProcessRequest',
+      'loginByName',
+      'simpleLogin',
+      'logoutUser',
+      'getAdminPage',
+      'getSocialPage',
+      'getAvailabilityData',
+      'getInitialData',
+      'getDashboard',
+      'getHallBookings'
+    ];
+
+    methods.forEach(function (method) {
+      runner[method] = function () {
+        invoke(method, Array.prototype.slice.call(arguments));
+        return runner;
+      };
+    });
+
+    return new Proxy(runner, {
+      get: function (target, prop) {
+        if (prop in target) return target[prop];
+        if (typeof prop !== 'string') return undefined;
+        return function () {
+          invoke(prop, Array.prototype.slice.call(arguments));
+          return runner;
+        };
+      }
+    });
+  }
+
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+  window.google.script.run = makeRunner(null, null);
+})();
+</script>
 </head>
 <body>
 

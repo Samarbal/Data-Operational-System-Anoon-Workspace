@@ -86,7 +86,7 @@ function _ic(k)    { try{ CacheService.getScriptCache().remove(k); }catch(e){} }
 function _ick(keys){ keys.forEach(function(k){ _ic(k); }); }
 
 function invV()  { _ick(['vis_all','vis_today','dash_today','dash_week','dash_month']); }
-function invR()  { _ick(['rooms_all','dash_today','dash_week','dash_month']); }
+function invR()  { _ick(['rooms_all','rooms_today','rooms_week','rooms_month','rooms_future','dash_today','dash_week','dash_month']); }
 function invS()  { _ick(['subs_all','dash_today','dash_week','dash_month']); }
 function invT()  { _ick(['tk_all','dash_today','dash_week','dash_month']); }
 function invFB() { _ick(['future_all']); }   // ← NEW
@@ -954,7 +954,8 @@ function getDashboardData(period){
     if(ti&&to){var a=ti.split(':'),b=to.split(':');tH+=Math.max(0,(+b[0]*60+ +b[1])-(+a[0]*60+ +a[1]))/60;}
   });
 
-  var rooms=getFilteredBookings(p==='today'?'today':p==='week'?'week':'month');
+  var allRooms=getFilteredBookings('all');
+  var rooms=allRooms.filter(function(r){ return inP(r.date); });
   rooms.forEach(function(r){rH+=r.diffMin/60;});
 
   var hourlyRev=0, dailyRev=0, weeklyRev=0, monthlyRev=0;
@@ -1013,8 +1014,7 @@ function getDashboardData(period){
     'visitor',function(v){return v.date||v.entryDate||'';},
     function(v){return v.subType;},function(v){return v.cost;}
   );
-  var allRoomsUnpaid=getFilteredBookings('all');
-  var unpaidR=mkUnpaid(allRoomsUnpaid,'room',
+  var unpaidR=mkUnpaid(allRooms,'room',
     function(r){return r.date;},function(r){return 'قاعة '+r.hall;},function(r){return r.revenue;});
   var unpaidS=mkUnpaid(allS,'sub',
     function(s){return s.startDate;},function(s){return s.subType;},function(s){return s.cost;});
@@ -1085,6 +1085,8 @@ function addNewBooking(data){
 }
 
 function getFilteredBookings(period){
+  var p=period||'today', ck='rooms_'+p;
+  var cached=_gc(ck); if(cached) return cached;
   var res=readAllPadded(SHEET_NAMES.ROOMS,RC);
   var today=new Date(); today.setHours(0,0,0,0);
   var result=[];
@@ -1093,9 +1095,9 @@ function getFilteredBookings(period){
     var ds=toD(row[R.DATE-1]); if(!ds) continue;
     var dp=ds.split('-'), rd=new Date(+dp[2],+dp[1]-1,+dp[0]); rd.setHours(0,0,0,0);
     var inc=false;
-    if(period==='today') inc=rd.getTime()===today.getTime();
-    else if(period==='week'){ var ws=new Date(today); ws.setDate(today.getDate()-6); inc=rd>=ws&&rd<=today; }
-    else if(period==='month') inc=rd.getMonth()===today.getMonth()&&rd.getFullYear()===today.getFullYear();
+    if(p==='today') inc=rd.getTime()===today.getTime();
+    else if(p==='week'){ var ws=new Date(today); ws.setDate(today.getDate()-6); inc=rd>=ws&&rd<=today; }
+    else if(p==='month') inc=rd.getMonth()===today.getMonth()&&rd.getFullYear()===today.getFullYear();
     else inc=true;
     if(!inc) continue;
     var st=toT(row[R.START-1]), en=toT(row[R.END-1]);
@@ -1117,10 +1119,11 @@ function getFilteredBookings(period){
       amountPaid:ap, amountRemaining:ar
     });
   }
-  result.reverse(); return result;
+  result.reverse(); _sc(ck,result); return result;
 }
 
 function getFutureHallBookings(){
+  var cached=_gc('rooms_future'); if(cached) return cached;
   var todayStr=fmtD(new Date());
   var res=readAllPadded(SHEET_NAMES.ROOMS,RC);
   var result=[];
@@ -1144,6 +1147,7 @@ function getFutureHallBookings(){
     });
   }
   result.sort(function(a,b){ return cmpDMY(a.date,b.date); });
+  _sc('rooms_future',result);
   return result;
 }
 
