@@ -29,6 +29,17 @@ type BookingData = {
   amountPaid?: number | string;
   paid?: "نعم" | "لا";
   chairs?: string | number;
+  _action?: string;
+  type?: string;
+};
+
+type ActionResult = {
+  success?: boolean;
+  error?: string;
+  rowIndex?: number;
+  date?: string;
+  duration?: string;
+  [key: string]: unknown;
 };
 
 /**
@@ -90,7 +101,7 @@ async function handleAddBooking(req: NextRequest, data: BookingData) {
   }
 
   try {
-    const result = await callProcessRequest("addBooking", {
+    const result = (await callProcessRequest("addBooking", {
       hall: data.hall,
       name: data.name?.trim(),
       phone: data.phone?.trim(),
@@ -103,7 +114,7 @@ async function handleAddBooking(req: NextRequest, data: BookingData) {
       amountPaid: data.amountPaid ? parseFloat(String(data.amountPaid)) : 0,
       notes: data.chairs ? `كراسي: ${data.chairs}` : (data.notes || ""),
       chairs: data.chairs || ""
-    });
+    })) as ActionResult;
 
     if (!result?.success) {
       return errorJson(result?.error || "فشل إضافة الحجز");
@@ -154,7 +165,7 @@ async function handleUpdateBooking(req: NextRequest, data: BookingData) {
         : (data.notes || "");
     if (data.paid !== undefined) updateData.paid = data.paid;
 
-    const result = await callProcessRequest("updateRoom", updateData);
+    const result = (await callProcessRequest("updateRoom", updateData)) as ActionResult;
 
     if (!result?.success) {
       return errorJson(result?.error || "فشل تحديث الحجز");
@@ -179,9 +190,9 @@ async function handleDeleteBooking(req: NextRequest, data: BookingData) {
   }
 
   try {
-    const result = await callProcessRequest("deleteBooking", {
+    const result = (await callProcessRequest("deleteBooking", {
       rowIndex: data.rowIndex
-    });
+    })) as ActionResult;
 
     if (!result?.success) {
       return errorJson(result?.error || "فشل حذف الحجز");
@@ -206,7 +217,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
   }
 
-  const body = await readJsonBody<BookingData & { _action?: string }>(req);
+  const body = await readJsonBody<BookingData & { _action?: string; type?: string }>(req);
   const action = String(body._action ?? body.type ?? "add").trim().toLowerCase();
   const data = body as BookingData;
 
