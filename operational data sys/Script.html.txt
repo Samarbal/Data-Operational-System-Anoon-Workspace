@@ -24,25 +24,33 @@ function boot() {
   if(ov && ov.style.display!=='none') return;
   google.script.run
     .withSuccessHandler(function(d) {
-      APP.visitors      = d.visitors      || [];
-      APP.subscriptions = d.subscriptions || [];
-      APP.tamkeen       = d.tamkeen       || [];
-      APP.opts          = d.opts          || {};
-      APP.today         = d.today         || '';
-      APP.todayDay      = d.todayDay      || '';
-      APP.dashData      = d.dashboard     || {};
-      populateDropdowns();
-      initAllFilters();
-      renderDashboard();
-      renderVisitors();
-      renderWeeklySubs();
-      renderMonthlySubs();
-      renderTamkeen();
-      renderVKPIs();
-      showToast('تم تحميل البيانات ✓','success');
-      _applyRoleUI();
-      loadAndRenderHalls();
-      loadFutureBookings();
+      try{
+        APP.visitors      = Array.isArray(d&&d.visitors) ? d.visitors : [];
+        APP.subscriptions = Array.isArray(d&&d.subscriptions) ? d.subscriptions : [];
+        APP.tamkeen       = Array.isArray(d&&d.tamkeen) ? d.tamkeen : [];
+        APP.opts          = (d&&d.opts) || {};
+        APP.today         = (d&&d.today) || '';
+        APP.todayDay      = (d&&d.todayDay) || '';
+        APP.dashData      = (d&&d.dashboard) || {};
+        populateDropdowns();
+        initAllFilters();
+        renderDashboard();
+        renderVisitors();
+        renderWeeklySubs();
+        renderMonthlySubs();
+        renderTamkeen();
+        renderVKPIs();
+        showToast('تم تحميل البيانات ✓','success');
+        _applyRoleUI();
+        loadAndRenderHalls();
+        loadFutureBookings();
+      }catch(err){
+        var m=(err&&err.message)?err.message:String(err||'');
+        showToast('تعذّر تجهيز الواجهة: '+m,'error');
+        var w=document.getElementById('weekly-tbody'); if(w) w.innerHTML='<tr><td colspan="12" class="empty-state">لا توجد اشتراكات</td></tr>';
+        var mo=document.getElementById('monthly-tbody'); if(mo) mo.innerHTML='<tr><td colspan="12" class="empty-state">لا توجد اشتراكات</td></tr>';
+        var t=document.getElementById('tamkeen-tbody'); if(t) t.innerHTML='<tr><td colspan="9" class="empty-state">لا توجد بيانات</td></tr>';
+      }
     })
     .withFailureHandler(function(e){ showToast('فشل التحميل: '+e.message,'error'); })
     .getInitialData();
@@ -110,7 +118,9 @@ function nowTime(){var n=new Date();return pad2(n.getHours())+':'+pad2(n.getMinu
 function nowDate(){var n=new Date();return pad2(n.getDate())+'-'+pad2(n.getMonth()+1)+'-'+n.getFullYear();}
 function toYMD(dmy){if(!dmy)return'';var p=dmy.split('-');return p[2]+'-'+p[1]+'-'+p[0];}
 function toDMY(ymd){if(!ymd)return'';var p=ymd.split('-');return p[2]+'-'+p[1]+'-'+p[0];}
-function daysLeft(expDMY){
+function normSubType(v){
+  var s=String(v||'').replace(/[\u200e\u200f\u061c]/g,'').trim();
+
   if(!expDMY)return null;
   var p=expDMY.split('-');
   var exp=new Date(+p[2],+p[1]-1,+p[0]);
@@ -1240,10 +1250,18 @@ function renderFutureBookings(list){
           var badge2=document.getElementById('future-badge');
           var rows2=document.querySelectorAll('#future-tbody tr:not(.empty-state)');
           if(badge2){badge2.textContent=rows2.length||'';badge2.style.display=rows2.length?'flex':'none';}
-          // FIX: avoid optimistic-only state updates; reload from server source of truth.
-          showToast('تم تسجيل دخول '+name,'success');
-          if(res.isFirstVisit) showToast('زيارة أولى','success');
-          setTimeout(function(){boot();},200);
+          // أضف لـ APP.visitors
+          APP.visitors.unshift({
+            rowIndex:res.rowIndex, ri:res.rowIndex, name:res.name||name,
+            phone:'', entryDate:res.entryDate, date:res.entryDate,
+            entryTime:res.entryTime, exitTime:'', duration:'', durationH:0,
+            subType:'', pipeline:'', firstVisit:res.isFirstVisit?'نعم':'لا',
+            cost:'', paid:'لا', amountPaid:0, amountRemaining:0, freezeTime:''
+          });
+          showToast('تم تسجيل دخول '+name+' ✓','success');
+          if(res.isFirstVisit) showToast('زيارة أولى ⭐','success');
+          renderVisitors(); renderVKPIs();
+          setTimeout(function(){loadDashboard(APP.dashPeriod);},1200);
         })
         .withFailureHandler(function(e){btn.disabled=false;btn.textContent='دخول الآن';showToast('خطأ: '+(e.message||''),'error');})
         .processRequest('checkinFromFuture',{futureRowIndex:ri});

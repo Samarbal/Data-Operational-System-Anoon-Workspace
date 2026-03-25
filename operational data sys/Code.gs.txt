@@ -96,8 +96,21 @@ function invFB() { _ick(['future_all']); }   // ← NEW
 // ═══════════════════════════════════════════════════════════════
 
 function sheet(name){
-  var s = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  var ss=SpreadsheetApp.getActiveSpreadsheet();
+  var resolved=name;
+  var s = ss.getSheetByName(resolved);
+  if(!s && name===SHEET_NAMES.TAMKEEN){
+    var tamkeenAliases=['تمكين إنسان','برنامج تمكين إنسان','طلاب تمكين'];
+    for(var i=0;i<tamkeenAliases.length;i++){
+      s=ss.getSheetByName(tamkeenAliases[i]);
+      if(s){ resolved=tamkeenAliases[i]; break; }
+    }
+  }
   if(!s) throw new Error('Sheet not found: ' + name);
+  // keep canonical constant synced once we discover the real tab name
+  if(name===SHEET_NAMES.TAMKEEN && resolved!==SHEET_NAMES.TAMKEEN){
+    SHEET_NAMES.TAMKEEN=resolved;
+  }
   return s;
 }
 
@@ -165,6 +178,13 @@ function addDays(dmy,n){
   return fmtD(d);
 }
 
+function cleanSubType(v){
+  var s=String(v||'').replace(/[\u200e\u200f\u061c]/g,'').trim();
+  if(s==='اسبوعي') return 'أسبوعي';
+  if(s==='شهرى')   return 'شهري';
+  return s;
+}
+
 function cmpDMY(a,b){
   var pa=a.split('-'), pb=b.split('-');
   var da=new Date(+pa[2],+pa[1]-1,+pa[0]), db=new Date(+pb[2],+pb[1]-1,+pb[0]);
@@ -202,6 +222,10 @@ function payCalc(cost,paid,fullFlag){
   return{cost:c, paid:p, rem:rem, paidFlag:rem<=0&&c>0?'نعم':'لا'};
 }
 
+function asArray(v){
+  return Object.prototype.toString.call(v)==='[object Array]' ? v : [];
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 5. ROW MAPPERS
 // ═══════════════════════════════════════════════════════════════
@@ -221,7 +245,7 @@ function mapVisitor(row,ri){
     day:String(row[V.DAY-1]||''),
     entryTime:toT(row[V.IN-1]), exitTime:toT(row[V.OUT-1]),
     duration:String(row[V.DUR-1]||''), durationH:parseFloat(row[V.DUR_H-1])||0,
-    subType:String(row[V.TYPE-1]||''), pipeline:String(row[V.PIPE-1]||''),
+    subType:cleanSubType(row[V.TYPE-1]), pipeline:String(row[V.PIPE-1]||''),
     firstVisit:String(row[V.FIRST-1]||''), cost:String(row[V.COST-1]||''),
     payType:String(row[V.PAY_T-1]||''), account:String(row[V.ACCT-1]||''),
     paid:String(row[V.PAID-1]||'').trim(), notes:String(row[V.NOTES-1]||''),
@@ -259,7 +283,7 @@ function mapSub(row,ri){
     ri:ri, rowIndex:ri,
     subId:row[S.ID-1]||'', name:String(row[S.NAME-1]||'').trim(),
     phone:String(row[S.PHONE-1]||'').trim(), pipeline:String(row[S.PIPE-1]||''),
-    subType:String(row[S.TYPE-1]||''), startDate:toD(row[S.START-1]),
+    subType:cleanSubType(row[S.TYPE-1]), startDate:toD(row[S.START-1]),
     expiryDate:expiry, cost:String(row[S.COST-1]||''),
     payType:String(row[S.PAY_T-1]||''), account:String(row[S.ACCT-1]||''),
     paid:String(row[S.PAID-1]||'').trim(), notes:String(row[S.NOTES-1]||''),
@@ -282,7 +306,7 @@ function mapFutureBooking(row,ri){
     phone    : String(row[FB.PHONE-1]||'').trim(),
     date     : toD(row[FB.DATE-1]),
     day      : String(row[FB.DAY-1]||''),
-    subType  : String(row[FB.TYPE-1]||''),
+    subType  : cleanSubType(row[FB.TYPE-1]),
     pipeline : String(row[FB.PIPE-1]||''),
     cost     : cost,
     payType  : String(row[FB.PAY_T-1]||''),
@@ -311,7 +335,7 @@ function getVisitors(filter){
     if(v.date && cmpDMY(v.date,today)>0)                                   continue;
     if(filter==='today'  && v.date!==today)                           continue;
     if(filter==='active' && v.exitTime!=='')                           continue;
-    if(filter==='hd'     && v.subType!=='ساعات'&&v.subType!=='يومي')  continue;
+    if(filter==='hd'     && cleanSubType(v.subType)!=='ساعات'&&cleanSubType(v.subType)!=='يومي')  continue;
     result.push(v);
   }
   result.reverse(); _sc(ck,result); return result;
@@ -330,6 +354,7 @@ function checkinVisitor(data){
   if(!data.name||!data.phone||!data.subType||!data.pipeline)
     return{success:false, error:'جميع الحقول مطلوبة'};
   var phone=String(data.phone).trim();
+  var subType=cleanSubType(data.subType);
   if(phone.replace(/\D/g,'').length<9) return{success:false, error:'رقم الهاتف غير صحيح'};
 
   var s=sheet(SHEET_NAMES.VISITORS), lr=s.getLastRow(), today=fmtD(new Date()), isFirst=true;
@@ -340,7 +365,7 @@ function checkinVisitor(data){
       var rp=String(rows[i][V.PHONE-1]||'').trim();
       if(rp!==phone) continue;
       isFirst=false;
-      if(toD(rows[i][V.DATE-1])===today && !toT(rows[i][V.OUT-1]) && String(rows[i][V.TYPE-1]||'')===data.subType)
+      if(toD(rows[i][V.DATE-1])===today && !toT(rows[i][V.OUT-1]) && cleanSubType(rows[i][V.TYPE-1])===subType)
         return{success:false, error:'هذا الزائر لا يزال داخلاً — سجّل خروجه أولاً'};
     }
   }
@@ -354,7 +379,7 @@ function checkinVisitor(data){
   var row=new Array(VC).fill('');
   row[V.ID-1]=nid; row[V.NAME-1]=data.name.trim(); row[V.PHONE-1]=phone;
   row[V.DATE-1]=eDate; row[V.DAY-1]=eDay; row[V.IN-1]=eTime;
-  row[V.TYPE-1]=data.subType; row[V.PIPE-1]=data.pipeline;
+  row[V.TYPE-1]=subType; row[V.PIPE-1]=data.pipeline;
   row[V.FIRST-1]=isFirst?'نعم':'لا'; row[V.NOTES-1]=(data.notes||'').trim();
   row[V.AMT_PAID-1]=0; row[V.AMT_REM-1]=0;
   var nr=lr+1; writeRow(s,nr,row);
@@ -527,7 +552,7 @@ function addFutureBooking(data){
   row[FB.PHONE-1]   = phone;
   row[FB.DATE-1]    = dateDMY;
   row[FB.DAY-1]     = eDay;
-  row[FB.TYPE-1]    = data.subType;
+  row[FB.TYPE-1]    = cleanSubType(data.subType);
   row[FB.PIPE-1]    = data.pipeline;
   row[FB.COST-1]    = pc.cost;
   row[FB.PAY_T-1]   = data.payType||'';
@@ -589,7 +614,7 @@ function checkinFromFuture(data){
 
   // FIX: weekly/monthly future bookings must go through subscriptions flow,
   // so they appear in the correct weekly/monthly tables after "���� ����".
-  var subTypeRaw=String(fb.subType||'').trim();
+  var subTypeRaw=cleanSubType(fb.subType);
   var WEEKLY='\u0623\u0633\u0628\u0648\u0639\u064A';
   var MONTHLY='\u0634\u0647\u0631\u064A';
   var HOURLY='\u0633\u0627\u0639\u0627\u062A';
@@ -646,7 +671,7 @@ function checkinFromFuture(data){
   var ciResult=checkinVisitor({
     name     :fb.name,
     phone    :fb.phone,
-    subType  :fb.subType,
+    subType  :subTypeRaw,
     pipeline :fb.pipeline,
     notes    :fb.notes||'',
     entryTime:data.entryTime||''
@@ -693,7 +718,7 @@ function updateFutureBooking(data){
   if(!row[FB.NAME-1]) return{success:false, error:'الحجز غير موجود'};
   if(data.name!==undefined)    row[FB.NAME-1]=data.name;
   if(data.phone!==undefined)   row[FB.PHONE-1]=data.phone;
-  if(data.subType!==undefined) row[FB.TYPE-1]=data.subType;
+  if(data.subType!==undefined) row[FB.TYPE-1]=cleanSubType(data.subType);
   if(data.pipeline!==undefined)row[FB.PIPE-1]=data.pipeline;
   if(data.notes!==undefined)   row[FB.NOTES-1]=data.notes;
   if(data.date){
@@ -718,7 +743,7 @@ function updateFutureBooking(data){
 
 function getSubscriptions(filter){
   var ck='subs_'+(filter||'all');
-  var cached=_gc(ck); if(cached) return cached;
+  var cached=_gc(ck); if(cached) return asArray(cached);
   var s=subsSheet(), lr=s.getLastRow();
   if(lr<=1) return [];
   var lc=Math.max(s.getLastColumn(),SC);
@@ -728,8 +753,9 @@ function getSubscriptions(filter){
     var sub=mapSub(rows[i],i+2); if(!sub.name) continue;
     if(filter==='active'  && sub.isExpired)         continue;
     if(filter==='expired' && !sub.isExpired)         continue;
-    if(filter==='weekly'  && sub.subType!=='أسبوعي') continue;
-    if(filter==='monthly' && sub.subType!=='شهري')   continue;
+    var subType=cleanSubType(sub.subType);
+    if(filter==='weekly'  && subType!=='أسبوعي') continue;
+    if(filter==='monthly' && subType!=='شهري')   continue;
     result.push(sub);
   }
   result.reverse(); _sc(ck,result); return result;
@@ -747,7 +773,7 @@ function addSubscription(data){
   var pc=payCalc(data.cost,data.amountPaid,data.paid&&!data.amountPaid);
   var row=new Array(SC).fill('');
   row[S.ID-1]=nid; row[S.NAME-1]=data.name.trim(); row[S.PHONE-1]=String(data.phone).trim();
-  row[S.PIPE-1]=data.pipeline||''; row[S.TYPE-1]=data.subType;
+  row[S.PIPE-1]=data.pipeline||''; row[S.TYPE-1]=cleanSubType(data.subType);
   row[S.START-1]=startDmy; row[S.EXPIRY-1]=expDmy;
   row[S.COST-1]=pc.cost; row[S.PAY_T-1]=data.payType||''; row[S.ACCT-1]=data.account||'';
   row[S.PAID-1]=pc.paidFlag; row[S.NOTES-1]=(data.notes||'').trim();
@@ -768,7 +794,7 @@ function subCheckin(data){
   var expiry=toD(srow[S.EXPIRY-1]);
   var isExp=expiry?cmpDMY(today,expiry)>0:false;
   var name=String(srow[S.NAME-1]||'').trim(), phone=String(srow[S.PHONE-1]||'').trim();
-  var subType=String(srow[S.TYPE-1]||''), pipeline=String(srow[S.PIPE-1]||'');
+  var subType=cleanSubType(srow[S.TYPE-1]), pipeline=String(srow[S.PIPE-1]||'');
   if(isExp) return{success:false, expired:true,
     error:'انتهت صلاحية اشتراك '+name+' بتاريخ '+expiry,
     name:name, phone:phone, subType:subType, expiryDate:expiry};
@@ -1235,8 +1261,16 @@ function getArchive(){
 
 function getTamkeenStudents(filter){
   var ck='tk_'+(filter||'all');
-  var cached=_gc(ck); if(cached) return cached;
-  var res=readAll(SHEET_NAMES.TAMKEEN);
+  var cached=_gc(ck); if(cached) return asArray(cached);
+  // If Tamkeen sheet is missing, don't break initial app load.
+  // Return empty list so UI can render "لا توجد بيانات".
+  var tkSheet;
+  try{ tkSheet=sheet(SHEET_NAMES.TAMKEEN); }catch(e){ tkSheet=null; }
+  if(!tkSheet){
+    _sc(ck,[]);
+    return [];
+  }
+  var res=readAll(tkSheet.getName());
   var today=fmtD(new Date()), students=[], baseRows={};
   for(var i=0;i<res.rows.length;i++){
     var row=res.rows[i]; while(row.length<TC) row.push('');
@@ -1384,14 +1418,15 @@ function include(f){ return HtmlService.createHtmlOutputFromFile(f).getContent()
 function getInitialData(){
   // تأكد أن شيت الحجوزات المسبقة موجود
   futureSheet();
-  var todayV  = getVisitors('today');
-  var allSubs = getSubscriptions('all');
-  var allTk   = getTamkeenStudents('all');
-  var dash    = getDashboardData('today');
+  var todayV=[], allSubs=[], allTk=[], dash={};
+  try{ todayV=getVisitors('today'); }catch(e){ Logger.log('getInitialData:getVisitors '+e); }
+  try{ allSubs=getSubscriptions('all'); }catch(e){ Logger.log('getInitialData:getSubscriptions '+e); }
+  try{ allTk=getTamkeenStudents('all'); }catch(e){ Logger.log('getInitialData:getTamkeenStudents '+e); }
+  try{ dash=getDashboardData('today'); }catch(e){ Logger.log('getInitialData:getDashboardData '+e); dash={period:'today'}; }
   return{
-    visitors     : todayV,
-    subscriptions: allSubs,
-    tamkeen      : allTk,
+    visitors     : asArray(todayV),
+    subscriptions: asArray(allSubs),
+    tamkeen      : asArray(allTk),
     opts         : OPTIONS,
     today        : fmtD(new Date()),
     todayDay     : dayName(new Date()),
@@ -1409,6 +1444,13 @@ function processRequest(action,data){
     data=data||{};
     var result;
     switch(action){
+      // ── Social (compat: in case this router is the active one) ──
+      case 'social_checkin'         : result=_socialCheckin(data);                            break;
+      case 'social_addFuture'       : result=addFutureBooking(data);                          break;
+      case 'social_addBooking'      : result=_socialAddBooking(data);                         break;
+      case 'social_getHallBookings' : result=_socialGetHallBookings(data);                    break;
+      case 'social_getDashboard'    : result=_socialGetDashboard(data);                       break;
+
       // ── Visitors ──────────────────────────────────────────────
       case 'getVisitors'            : result=getVisitors(data.filter);                        break;
       case 'checkin'                : result=checkinVisitor(data);                            break;

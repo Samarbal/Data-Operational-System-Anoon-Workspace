@@ -66,183 +66,128 @@ function getSocialPage() {
 // ═══════════════════════════════════════════════════════════════
 function processRequest(action, data) {
   data = data || {};
+  // Keep archive batching behavior from Code.gs processRequest.
+  // Auth_Code redefines processRequest, so we must flush pending archive writes here too.
+  if (typeof _archivePending !== 'undefined') _archivePending = [];
   try {
+    var result;
     switch (action) {
       // SOCIAL ACTIONS
-      case 'social_checkin':         return _socialCheckin(data);
-      case 'social_addFuture':       return addFutureBooking(data);
-      case 'social_addBooking':      return _socialAddBooking(data);
-      case 'social_getHallBookings': return _socialGetHallBookings(data);
-      case 'social_getDashboard':    return _socialGetDashboard(data);
-
+      case 'social_checkin':         result = _socialCheckin(data); break;
+      case 'social_addFuture':       result = addFutureBooking(data); break;
+      case 'social_addBooking':      result = _socialAddBooking(data); break;
+      case 'social_getHallBookings': result = _socialGetHallBookings(data); break;
+      case 'social_getDashboard':    result = _socialGetDashboard(data); break;
       // VISITORS
-      case 'getVisitors':             return getVisitors(data.filter);
-      case 'checkin':                 return checkinVisitor(data);
-      case 'checkout':                return checkoutVisitor(data);
-      case 'updateVisitor':           return updateVisitor(data);
-      case 'lookupByName':            return lookupByName(data.name);
-      case 'freezeTime':              return freezeVisitorTime(data);
-      case 'unfreezeTime':            return unfreezeVisitorTime(data);
-      case 'updatePayment':           return updatePayment(data);
-
+      case 'getVisitors':             result = getVisitors(data.filter); break;
+      case 'checkin':                 result = checkinVisitor(data); break;
+      case 'checkout':                result = checkoutVisitor(data); break;
+      case 'updateVisitor':           result = updateVisitor(data); break;
+      case 'lookupByName':            result = lookupByName(data.name); break;
+      case 'freezeTime':              result = freezeVisitorTime(data); break;
+      case 'unfreezeTime':            result = unfreezeVisitorTime(data); break;
+      case 'updatePayment':           result = updatePayment(data); break;
       // FUTURE BOOKINGS
-      case 'addFutureBooking':        return addFutureBooking(data);
-      case 'getFutureBookings':       return getFutureBookings();
-      case 'checkinFromFuture':       return checkinFromFuture(data);
-      case 'cancelFutureBooking':     return cancelFutureBooking(data);
-      case 'updateFutureBooking':     return updateFutureBooking(data);
-
+      case 'addFutureBooking':        result = addFutureBooking(data); break;
+      case 'getFutureBookings':       result = getFutureBookings(); break;
+      case 'checkinFromFuture':       result = checkinFromFuture(data); break;
+      case 'cancelFutureBooking':     result = cancelFutureBooking(data); break;
+      case 'updateFutureBooking':     result = updateFutureBooking(data); break;
       // SUBSCRIPTIONS
-      case 'getSubs':                 return getSubscriptions(data.filter);
-      case 'addSub':                  return addSubscription(data);
-      case 'subCheckin':              return subCheckin(data);
-      case 'subCheckout':             return subCheckout(data);
-      case 'updateSub':               return updateSubscription(data);
-      case 'updateSubVisitorTimes':   return updateSubVisitorTimes(data);
-      case 'lookupSubByName':         return lookupSubByName(data.name);
-
+      case 'getSubs':                 result = getSubscriptions(data.filter); break;
+      case 'addSub':                  result = addSubscription(data); break;
+      case 'subCheckin':              result = subCheckin(data); break;
+      case 'subCheckout':             result = subCheckout(data); break;
+      case 'updateSub':               result = updateSubscription(data); break;
+      case 'updateSubVisitorTimes':   result = updateSubVisitorTimes(data); break;
+      case 'lookupSubByName':         result = lookupSubByName(data.name); break;
       // ROOMS
-      case 'addBooking':              return addNewBooking(data);
-      case 'getHallBookings':         return getFilteredBookings(data.period||'today');
-      case 'getFutureHallBookings':   return getFutureHallBookings();
-      case 'updateRoom':              return updateRoom(data);
-      case 'deleteRoom':              return deleteRoom(data);
-      case 'deleteBooking':           return deleteBooking(data);
-
+      case 'addBooking':              result = addNewBooking(data); break;
+      case 'getHallBookings':         result = getFilteredBookings(data.period||'today'); break;
+      case 'getFutureHallBookings':   result = getFutureHallBookings(); break;
+      case 'updateRoom':              result = updateRoom(data); break;
+      case 'deleteRoom':              result = deleteRoom(data); break;
+      case 'deleteBooking':           result = deleteBooking(data); break;
       // TAMKEEN
-      case 'getTamkeen':              return getTamkeenStudents(data.filter);
-      case 'tamkeenCheckin':          return tamkeenCheckinSheet(data);
-      case 'tamkeenCheckout':         return tamkeenCheckoutSheet(data);
-      case 'updateTamkeen':           return updateTamkeen(data);
-      case 'updateTamkeenAttendance': return updateTamkeenAttendance(data);
-      case 'freezeTamkeenTime':       return freezeTamkeenTime(data);
-      case 'unfreezeTamkeenTime':     return unfreezeTamkeenTime(data);
-
+      case 'getTamkeen':              result = getTamkeenStudents(data.filter); break;
+      case 'tamkeenCheckin':          result = tamkeenCheckinSheet(data); break;
+      case 'tamkeenCheckout':         result = tamkeenCheckoutSheet(data); break;
+      case 'updateTamkeen':           result = updateTamkeen(data); break;
+      case 'updateTamkeenAttendance': result = updateTamkeenAttendance(data); break;
+      case 'freezeTamkeenTime':       result = freezeTamkeenTime(data); break;
+      case 'unfreezeTamkeenTime':     result = unfreezeTamkeenTime(data); break;
       // DASHBOARD
-      case 'getDashboard':            return getDashboardData(data.period||'today');
-      case 'getInitialData':          return getInitialData();
-      case 'getOptions':              return OPTIONS;
-      case 'getArchive':              return getArchive();
-
+      case 'getDashboard':            result = getDashboardData(data.period||'today'); break;
+      case 'getInitialData':          result = getInitialData(); break;
+      case 'getOptions':              result = OPTIONS; break;
+      case 'getArchive':              result = getArchive(); break;
       default:
-        return { success: false, error: 'إجراء غير معروف: ' + action };
+        result = { success: false, error: 'إجراء غير معروف: ' + action };
     }
+    if (typeof _flushArchive === 'function') _flushArchive();
+    return result;
   } catch(e) {
     Logger.log('processRequest [' + action + ']: ' + e.toString());
     return { success: false, error: e.toString() };
   }
 }
-
 // ═══════════════════════════════════════════════════════════════
 // AVAILABILITY DATA
 // ═══════════════════════════════════════════════════════════════
 function getAvailabilityData() {
-  var cacheKey='availability:v2', cacheTtl=30;
-  try{
-    var cached=CacheService.getScriptCache().get(cacheKey);
-    if(cached) return JSON.parse(cached);
-  }catch(e){}
-
   var ss = SpreadsheetApp.getActiveSpreadsheet(), TOTAL = 70;
-  var activeExpiries = [], hallsByDate = {}, visByDate = {};
-  var today = new Date();
-  today.setHours(0,0,0,0);
-  var todayStr = _p2(today.getDate())+'-'+_p2(today.getMonth()+1)+'-'+today.getFullYear();
-  var days = [];
-
-  var SUBS_SHEET='\u0627\u0634\u062a\u0631\u0627\u0643\u0627\u062a';
-  var ROOMS_SHEET='\u062d\u062c\u0632 \u0642\u0627\u0639\u0627\u062a';
-  var VISITORS_SHEET='\u0633\u062c\u0644 \u0627\u0644\u0632\u0648\u0627\u0631';
-  var WEEKLY='\u0623\u0633\u0628\u0648\u0639\u064a';
-  var MONTHLY='\u0634\u0647\u0631\u064a';
-  var EXPIRED='\u0645\u0646\u062a\u0647\u064a';
-  var TAMKEEN='\u0628\u0631\u0646\u0627\u0645\u062c \u062a\u0645\u0643\u064a\u0646 \u0625\u0646\u0633\u0627\u0646';
-
-  var subsSheet = ss.getSheetByName(SUBS_SHEET);
+  var activeSubs = [], hallsByDate = {};
+  var subsSheet = ss.getSheetByName('اشتراكات');
   if (subsSheet && subsSheet.getLastRow() > 1) {
-    var subRows = subsSheet.getRange(2,1,subsSheet.getLastRow()-1,19).getValues();
-    for (var si=0; si<subRows.length; si++) {
-      var sr = subRows[si];
-      var type = String(sr[4]||'').trim();
-      var status = String(sr[14]||'').trim();
-      if ((type!==WEEKLY && type!==MONTHLY) || status===EXPIRED) continue;
-
-      var ex = sr[6], exDate = null;
-      if (ex instanceof Date) {
-        exDate = new Date(ex.getFullYear(), ex.getMonth(), ex.getDate());
-      } else {
-        var exp = String(ex||'').trim();
-        var p = exp.split('-');
-        if (p.length===3) exDate = new Date(+p[2], +p[1]-1, +p[0]);
+    subsSheet.getRange(2,1,subsSheet.getLastRow()-1,19).getValues().forEach(function(r){
+      var type=String(r[4]||'').trim(), expiry=String(r[6]||'').trim(), status=String(r[14]||'').trim();
+      if((type==='أسبوعي'||type==='شهري')&&status!=='منتهي'&&expiry){
+        var p=expiry.split('-'); if(p.length===3) activeSubs.push({expiry:new Date(+p[2],+p[1]-1,+p[0])});
       }
-      if (exDate) activeExpiries.push(exDate);
-    }
-  }
-
-  var roomsSheet = ss.getSheetByName(ROOMS_SHEET);
-  if (roomsSheet && roomsSheet.getLastRow() > 1) {
-    var roomRows = roomsSheet.getRange(2,1,roomsSheet.getLastRow()-1,15).getValues();
-    for (var ri=0; ri<roomRows.length; ri++) {
-      var rr = roomRows[ri];
-      var rd = rr[5];
-      if (!rd) continue;
-      var ds = rd instanceof Date
-        ? (_p2(rd.getDate())+'-'+_p2(rd.getMonth()+1)+'-'+rd.getFullYear())
-        : String(rd).trim();
-      var m = String(rr[14]||'').match(/\u0643\u0631\u0627\u0633\u064a:\s*(\d+)/);
-      hallsByDate[ds] = (hallsByDate[ds]||0) + (m ? parseInt(m[1],10) : 1);
-    }
-  }
-
-  var liveNow = 0;
-  var visSheet = ss.getSheetByName(VISITORS_SHEET);
-  if (visSheet && visSheet.getLastRow() > 1) {
-    var visRows = visSheet.getRange(2,1,visSheet.getLastRow()-1,20).getValues();
-    for (var vi=0; vi<visRows.length; vi++) {
-      var v = visRows[vi];
-      var vd = v[3] instanceof Date
-        ? (_p2(v[3].getDate())+'-'+_p2(v[3].getMonth()+1)+'-'+v[3].getFullYear())
-        : String(v[3]||'').trim();
-      var isTamkeen = String(v[10]||'').trim()===TAMKEEN;
-      if (!vd || isTamkeen) continue;
-
-      visByDate[vd] = (visByDate[vd]||0) + 1;
-      if (vd===todayStr && !String(v[6]||'').trim()) liveNow++;
-    }
-  }
-
-  activeExpiries.sort(function(a,b){ return a-b; });
-  var expiryIdx = 0, expiryTotal = activeExpiries.length;
-
-  for (var i=0; i<7; i++) {
-    var d = new Date(today);
-    d.setDate(today.getDate()+i);
-    while (expiryIdx<expiryTotal && activeExpiries[expiryIdx] < d) expiryIdx++;
-
-    var ds2 = _p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();
-    var sub = expiryTotal - expiryIdx;
-    var hall = hallsByDate[ds2] || 0;
-    var dayVis = visByDate[ds2] || 0;
-
-    days.push({
-      date: ds2,
-      dayName: _dayName(d),
-      isToday: i===0,
-      subChairs: sub,
-      hallChairs: hall,
-      occupied: sub + hall + dayVis,
-      available: Math.max(0, TOTAL - sub - hall - dayVis),
-      total: TOTAL
     });
   }
+  var roomsSheet = ss.getSheetByName('حجز قاعات');
+  if (roomsSheet && roomsSheet.getLastRow() > 1) {
+    roomsSheet.getRange(2,1,roomsSheet.getLastRow()-1,15).getValues().forEach(function(r){
+      var rd=r[5]; if(!rd) return;
+      var ds=rd instanceof Date?(_p2(rd.getDate())+'-'+_p2(rd.getMonth()+1)+'-'+rd.getFullYear()):String(rd).trim();
+      var m=String(r[14]||'').match(/كراسي:\s*(\d+)/);
+      hallsByDate[ds]=(hallsByDate[ds]||0)+(m?parseInt(m[1]):1);
+    });
+  }
+  var today=new Date(); today.setHours(0,0,0,0);
+  var dn=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'], days=[];
 
-  var result = { days: days, liveNow: liveNow, available: Math.max(0, TOTAL-liveNow), total: TOTAL };
-  try {
-    var payload = JSON.stringify(result);
-    if (payload.length < 90000) CacheService.getScriptCache().put(cacheKey, payload, cacheTtl);
-  } catch(e) {}
-  return result;
+  var visSheet2=ss.getSheetByName('سجل الزوار'), visRows2=[];
+  if(visSheet2&&visSheet2.getLastRow()>1)
+    visRows2=visSheet2.getRange(2,1,visSheet2.getLastRow()-1,11).getValues();
+
+  for(var i=0;i<7;i++){
+    var d=new Date(today); d.setDate(today.getDate()+i);
+    var ds=_p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();
+    var sub=activeSubs.filter(function(x){return x.expiry>=d;}).length;
+    var hall=hallsByDate[ds]||0;
+    var dayVis=0;
+    visRows2.forEach(function(rv){
+      var vd=rv[3] instanceof Date?(_p2(rv[3].getDate())+'-'+_p2(rv[3].getMonth()+1)+'-'+rv[3].getFullYear()):String(rv[3]||'').trim();
+      if(vd===ds&&String(rv[10]||'').trim()!=='برنامج تمكين إنسان') dayVis++;
+    });
+    days.push({date:ds,dayName:dn[d.getDay()],isToday:i===0,subChairs:sub,hallChairs:hall,
+      occupied:sub+hall+dayVis,available:Math.max(0,TOTAL-sub-hall-dayVis),total:TOTAL});
+  }
+
+  var visSheet=ss.getSheetByName('سجل الزوار'), liveNow=0;
+  if(visSheet&&visSheet.getLastRow()>1){
+    var todayStr=_p2(today.getDate())+'-'+_p2(today.getMonth()+1)+'-'+today.getFullYear();
+    visSheet.getRange(2,1,visSheet.getLastRow()-1,20).getValues().forEach(function(r){
+      var vd=r[3] instanceof Date?(_p2(r[3].getDate())+'-'+_p2(r[3].getMonth()+1)+'-'+r[3].getFullYear()):String(r[3]||'').trim();
+      if(vd===todayStr&&!String(r[6]||'').trim()&&String(r[10]||'').trim()!=='برنامج تمكين إنسان') liveNow++;
+    });
+  }
+  return{days:days,liveNow:liveNow,available:Math.max(0,TOTAL-liveNow),total:TOTAL};
 }
+
+
 var _p2=function(n){return String(n).padStart(2,'0');};
 var _fmtD=function(d){return _p2(d.getDate())+'-'+_p2(d.getMonth()+1)+'-'+d.getFullYear();};
 var _fmtT=function(d){return _p2(d.getHours())+':'+_p2(d.getMinutes())+':'+_p2(d.getSeconds());};
@@ -252,40 +197,18 @@ function _socialCheckin(data) {
   if(!data.name||!data.phone||!data.subType||!data.pipeline)
     return{success:false,error:'جميع الحقول مطلوبة'};
   var phone=String(data.phone).trim();
+  var subType=(typeof cleanSubType==='function')?cleanSubType(data.subType):String(data.subType||'').trim();
   if(phone.replace(/\D/g,'').length<9) return{success:false,error:'رقم الهاتف غير صحيح'};
+  var ss=SpreadsheetApp.getActiveSpreadsheet();
+
+
+
   var ss=SpreadsheetApp.getActiveSpreadsheet();
   var vs=ss.getSheetByName('سجل الزوار');
   if(!vs) return{success:false,error:'ورقة سجل الزوار غير موجودة'};
   var now=new Date(), todayStr=_fmtD(now), timeStr=_fmtT(now);
-  var requestedDate=String(data.entryDate||data.date||'').trim();
-  if(/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)){
-    var _d=requestedDate.split('-');
-    requestedDate=_d[2]+'-'+_d[1]+'-'+_d[0];
-  }
-
-  // FIX: if social creates a future-date booking, keep it in "حجوزات مسبقة"
-  // so it won't appear in active visitors until admin clicks "دخول الآن".
-  if(requestedDate && /^\d{2}-\d{2}-\d{4}$/.test(requestedDate) && cmpDMY(requestedDate,todayStr)>0){
-    return addFutureBooking({
-      name:data.name,
-      phone:phone,
-      subType:data.subType,
-      pipeline:data.pipeline,
-      date:requestedDate,
-      cost:data.cost,
-      amountPaid:data.amountPaid,
-      amountRemaining:data.amountRemaining,
-      payType:data.payType||'',
-      account:data.account||'',
-      notes:data.notes||''
-    });
-  }
-
   var entryTime=(data.entryTime&&/^\d{2}:\d{2}/.test(data.entryTime))
     ?(data.entryTime.length===5?data.entryTime+':00':data.entryTime):timeStr;
-  var finalDate=(requestedDate&&/^\d{2}-\d{2}-\d{4}$/.test(requestedDate))?requestedDate:todayStr;
-  var _dp=finalDate.split('-');
-  var finalDay=_dayName(new Date(+_dp[2],+_dp[1]-1,+_dp[0]));
   var isFirst=true, lr=vs.getLastRow();
   if(lr>1){
     var rows=vs.getRange(2,1,lr-1,20).getValues();
@@ -295,20 +218,20 @@ function _socialCheckin(data) {
       isFirst=false;
       var rDate=rows[i][3] instanceof Date?_fmtD(rows[i][3]):String(rows[i][3]||'').trim();
       var rOut=String(rows[i][6]||'').trim();
-      if(rDate===finalDate&&!rOut&&String(rows[i][9]||'')===data.subType)
+      if(rDate===todayStr&&!rOut&&String(rows[i][9]||'')===data.subType)
         return{success:false,error:'هذا الزائر لا يزال داخلاً'};
     }
   }
   var nid=1;
   if(lr>1){var ids=vs.getRange(2,1,lr-1,1).getValues();ids.forEach(function(r){var v=parseInt(r[0])||0;if(v>=nid)nid=v+1;});}
   var row=new Array(20).fill('');
-  row[0]=nid;row[1]=data.name.trim();row[2]=phone;row[3]=finalDate;row[4]=finalDay;
+  row[0]=nid;row[1]=data.name.trim();row[2]=phone;row[3]=todayStr;row[4]=_dayName(now);
   row[5]=entryTime;row[9]=data.subType;row[10]=data.pipeline;row[11]=isFirst?'نعم':'لا';
   row[12]=parseFloat(data.cost)||0;row[15]='لا';row[16]=data.notes||'';
   row[17]=parseFloat(data.amountPaid)||0;row[18]=parseFloat(data.amountRemaining)||0;
   vs.getRange(lr+1,1,1,row.length).setValues([row]);
-  _authUpsertArchive(ss,data.name.trim(),phone,data.pipeline,finalDate);
-  return{success:true,rowIndex:lr+1,id:nid,isFirstVisit:isFirst,entryDate:finalDate,entryTime:entryTime};
+  _authUpsertArchive(ss,data.name.trim(),phone,data.pipeline,todayStr);
+  return{success:true,rowIndex:lr+1,id:nid,isFirstVisit:isFirst,entryDate:todayStr,entryTime:entryTime};
 }
 
 function _socialAddBooking(data) {
@@ -413,4 +336,3 @@ function _authUpsertArchive(ss,name,phone,pipeline,date){
     s.getRange(s.getLastRow()+1,1,1,6).setValues([[name,phone,date,date,1,pipeline]]);
   }catch(e){Logger.log('_authUpsertArchive: '+e);}
 }
-

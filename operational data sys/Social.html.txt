@@ -562,6 +562,11 @@ document.getElementById("btn-ci").addEventListener("click", function(){
 
   var rem = Math.max(0,cost-paid);
   var dateDMY = dmy(dateV);
+  var dateObj = new Date(dateV);
+  var todayObj = new Date(today());
+  todayObj.setHours(0,0,0,0);
+  dateObj.setHours(0,0,0,0);
+  var action = (dateObj > todayObj) ? "addFuture" : "checkin";
 
   setLoad("btn-ci",true,"تأكيد الحجز");
   google.script.run
@@ -594,11 +599,12 @@ document.getElementById("btn-ci").addEventListener("click", function(){
       setLoad("btn-ci",false,"تأكيد الحجز");
       showB("ci-err","⚠ فشل الاتصال: "+(e.message||""));
     })
-    .socialProcessRequest("checkin",{
+    .socialProcessRequest(action,{
       name           : name,
       phone          : phone,
       subType        : sub,
       pipeline       : pipe,
+      date           : dateDMY,
       entryDate      : dateDMY,
       entryTime      : timeV || nowTime(),
       cost           : cost,
