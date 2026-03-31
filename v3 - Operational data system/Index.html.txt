@@ -1,3 +1,5 @@
+// Index.html 
+
 <!DOCTYPE html>
 <html lang="ar">
 <head>
@@ -242,6 +244,8 @@
           <span class="rev-chip" id="dk-rev-subs">أسبوعي/شهري —</span>
           <span class="rev-chip" id="dk-rev-t">تمكين —</span>
           <span class="rev-chip" id="dk-rev-r">قاعات —</span>
+          <span class="rev-chip" id="dk-rev-snack" style="background:rgba(245,158,11,.15);color:#d97706;">سناك —</span>
+
         </div>
       </div>
       <div class="card kpi-green">
@@ -483,6 +487,14 @@
       <span style="font-size:.82rem;color:var(--text-muted);">التكلفة المحسوبة</span>
       <strong id="co-auto-cost" style="color:var(--accent);font-size:1.1rem;">₪ —</strong>
     </div>
+    
+
+    <div id="co-snack-display" 
+     style="display:none;margin-top:6px;padding:6px 10px;
+            background:#fef3c7;border-radius:8px;
+            color:#d97706;font-size:.85rem;font-weight:600;">
+    </div>
+
     <div class="form-grid">
       <div class="form-group">
         <label>التكلفة الإجمالية (₪) <small style="color:var(--text-muted)">(قابلة للتعديل)</small></label>
@@ -752,6 +764,58 @@
 </div>
 
 
+<!-- Snacks model  -->
+<div id="modal-snack" class="modal-overlay">
+  <div class="modal-card" style="max-width:400px;background:#eef5ff;border-radius:20px;">
+    <div class="modal-header" style="padding:1.25rem 1.5rem;">
+      <h3>☕ إضافة سناك</h3>
+      <button class="modal-close" data-close="modal-snack">✕</button>
+    </div>
+    <div class="modal-body" style="padding:1.5rem;">
+      <div style="background:white;border-radius:12px;padding:1rem;margin-bottom:1.5rem;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.75rem;">
+          <span style="color:var(--text-muted);">الزائر</span>
+          <strong id="snk-visitor-name"></strong>
+        </div>
+        <!-- <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-muted);">التكلفة الحالية</span>
+          <span id="snk-base-cost" style="color:var(--accent);font-weight:700;">₪0</span>
+        </div> -->
+
+
+        <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;">
+          <span style="color:var(--text-muted);">التكلفة الحالية</span>
+          <span id="snk-base-cost" style="color:var(--accent);font-weight:700;">₪0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-muted);">سناك مسبق</span>
+          <span id="snk-current-snack" style="color:#d97706;font-weight:600;">—</span>
+        </div>
+
+        
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label class="form-label">المبلغ (₪)</label>
+        <input id="snk-amount" type="number" min="0.5" step="0.5"
+               class="form-input" placeholder="0"
+               style="font-size:1.2rem;text-align:center;padding:0.75rem;">
+      </div>
+      <div class="form-group" style="margin-bottom:1.5rem;">
+        <label class="form-label">ملاحظة (اختياري)</label>
+        <input id="snk-note" type="text" class="form-input">
+      </div>
+      <div style="padding:1rem;background:white;border-radius:12px;
+                  display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-weight:600;">الإجمالي بعد الإضافة</span>
+        <strong id="snk-total-display" style="font-size:1.2rem;color:var(--success);">₪0</strong>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding:1rem 1.5rem 1.5rem;">
+      <button id="btn-snk-confirm" class="btn btn-primary">إضافة للحساب ✓</button>
+      <button class="btn btn-secondary" data-close="modal-snack">إلغاء</button>
+    </div>
+  </div>
+</div>
 
 <!-- Inline Payment Modal -->
 <div class="modal-overlay" id="modal-inline-payment">
@@ -938,7 +1002,6 @@
   </div>
 </div>
 
-<!-- BUG 1: منع تكرار تهيئة الواجهة — الحارس في نهاية ملف Script (window.onload → __ANOON_INDEX_INITIALIZED__) -->
 <?!= include('Script') ?>
 </body>
 </html>

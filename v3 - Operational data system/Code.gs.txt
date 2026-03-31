@@ -1,9 +1,9 @@
-﻿// Anoon Workspace — Code.gs (v8 — Future Bookings Refactor)
+// Anoon Workspace — Code.gs (Optimized)
 // ─────────────────────────────────────────────────────────────────
 // Schema quick-ref
 //  سجل الزوار     : A=ID B=Name C=Phone D=Date E=Day F=EntryTime G=ExitTime
 //                   H=Duration I=DurationH J=SubType K=Pipeline L=FirstVisit
-//                   M=Cost N=PayType O=Account P=Paid Q=Notes
+//                   M=Cost N=PayType O=Account P=Paid Q=NotesPIPELINES
 //                   R=AmountPaid S=AmountRemaining T=FreezeTime
 //  حجز قاعات      : A=ID B=Name C=Phone D=Room E=Pipeline F=Date G=Day
 //                   H=StartTime I=EndTime J=Duration K=Cost L=PayType
@@ -29,18 +29,24 @@ var SHEET_NAMES = {
   ARCHIVE  : 'أرشيف الزبائن',
   TAMKEEN  : 'طلاب تمكين',
   SUBS     : 'اشتراكات',
-  FUTURE   : 'حجوزات مسبقة'   // ← NEW
+  FUTURE   : 'حجوزات مسبقة'
 };
 
 var TOTAL_CHAIRS = 70;
 var HOURLY_RATE  = 5;
-var CACHE_TTL    = 30;
+var CACHE_TTL    = 300;
+var INIT_CACHE_KEY = 'init_payload';
+var BOOT_CACHE_KEY = 'boot_payload';
+var VIS_NAME_INDEX_KEY = 'vis_name_idx';
+var _VIS_NAME_INDEX_MEM = null;
 
 // سجل الزوار columns
 var V = { ID:1,NAME:2,PHONE:3,DATE:4,DAY:5,IN:6,OUT:7,DUR:8,DUR_H:9,
           TYPE:10,PIPE:11,FIRST:12,COST:13,PAY_T:14,ACCT:15,PAID:16,
-          NOTES:17,AMT_PAID:18,AMT_REM:19,FREEZE:20 };
-var VC = 20;
+          NOTES:17,AMT_PAID:18,AMT_REM:19,FREEZE:20,SNACK:21,PURE_COST:22 };
+var VC = 22;
+
+
 
 // حجز قاعات columns
 var R = { ID:1,NAME:2,PHONE:3,ROOM:4,PIPE:5,DATE:6,DAY:7,
@@ -51,15 +57,15 @@ var RC = 17;
 // اشتراكات columns
 var S = { ID:1,NAME:2,PHONE:3,PIPE:4,TYPE:5,START:6,EXPIRY:7,
           COST:8,PAY_T:9,ACCT:10,PAID:11,NOTES:12,VISITS:13,
-          LAST_V:14,STATUS:15,VIS_IDS:16,HOURS:17,AMT_PAID:18,AMT_REM:19 };
-var SC = 19;
+          LAST_V:14,STATUS:15,VIS_IDS:16,HOURS:17,AMT_PAID:18,AMT_REM:19,SNACK:20 };
+var SC = 20;
 
 // طلاب تمكين columns
 var T = { GROUP:1,NAME:2,PHONE:3,EMAIL:4,DATE:5,IN:6,OUT:7,
-          DUR:8,DUR_H:9,COST:10,NOTES:11,FREEZE:12 };
-var TC = 12;
+          DUR:8,DUR_H:9,COST:10,NOTES:11,SNACK:12,SNACK_PAID:13,FREEZE:14 };
+var TC = 14;
 
-// حجوزات مسبقة columns ← NEW
+// حجوزات مسبقة columns
 var FB = { ID:1,NAME:2,PHONE:3,DATE:4,DAY:5,TYPE:6,
            PIPE:7,COST:8,PAY_T:9,ACCT:10,PAID:11,
            NOTES:12,AMT_PAID:13,AMT_REM:14,CREATED:15 };
@@ -69,7 +75,7 @@ var A = { NAME:1,PHONE:2,FIRST:3,LAST:4,COUNT:5,PIPE:6 };
 
 var OPTIONS = {
   SUB_TYPES    : ['ساعات','يومي','أسبوعي','شهري'],
-  PIPELINES    : ['وسائل التواصل الاجتماعي','برنامج تمكين إنسان','معرفة شخصية','إعلان','دورة'],
+  PIPELINES    : ['وسائل التواصل الاجتماعي','برنامج تمكين إنسان','معرفة شخصية','إعلان','دورة', 'صديق'],
   PAY_TYPES    : ['كاش','تحويل بنكي'],
   ACCOUNTS     : ['حساب علاء','حساب نور'],
   ROOMS        : ['A','B','C'],
@@ -80,58 +86,108 @@ var OPTIONS = {
 // 2. CACHE
 // ═══════════════════════════════════════════════════════════════
 
-function _gc(k)    { try{ var r=CacheService.getScriptCache().get(k); return r?JSON.parse(r):null; }catch(e){ return null; } }
-function _sc(k,d)  { try{ var r=JSON.stringify(d); if(r.length<90000) CacheService.getScriptCache().put(k,r,CACHE_TTL); }catch(e){} }
-function _ic(k)    { try{ CacheService.getScriptCache().remove(k); }catch(e){} }
-function _ick(keys){ keys.forEach(function(k){ _ic(k); }); }
+var _SCRIPT_CACHE = CacheService.getScriptCache();
+var _SHEET_CACHE = null;
+var _SHEET_OBJECTS = {};
+var _ensuredFutureSheet = null;
+var _ensuredSubsSheet = null;
 
-function invV()  { _ick(['vis_all','vis_today','dash_today','dash_week','dash_month']); }
-function invR()  { _ick(['rooms_all','rooms_today','rooms_week','rooms_month','rooms_future','dash_today','dash_week','dash_month']); }
-function invS()  { _ick(['subs_all','dash_today','dash_week','dash_month']); }
-function invT()  { _ick(['tk_all','dash_today','dash_week','dash_month']); }
-function invFB() { _ick(['future_all']); }   // ← NEW
+function _gc(k){
+  try{
+    var r = _SCRIPT_CACHE.get(k);
+    return r ? JSON.parse(r) : null;
+  }catch(e){
+    return null;
+  }
+}
+function _sc(k,d){
+  try{
+    var r = JSON.stringify(d);
+    if(r.length < 90000) _SCRIPT_CACHE.put(k, r, CACHE_TTL);
+  }catch(e){}
+}
+function _ic(k){
+  try{ _SCRIPT_CACHE.remove(k); }catch(e){}
+}
+function _ick(keys){
+  for(var i=0;i<keys.length;i++) _ic(keys[i]);
+}
+
+function invV(){
+  _VIS_NAME_INDEX_MEM = null;
+  _ick(['vis_all','vis_today','vis_active','vis_hd','dash_today','dash_week','dash_month', INIT_CACHE_KEY, BOOT_CACHE_KEY, VIS_NAME_INDEX_KEY]);
+}
+function invR(){ _ick(['rooms_all','rooms_today','rooms_week','rooms_month','rooms_future','dash_today','dash_week','dash_month', INIT_CACHE_KEY, BOOT_CACHE_KEY]); }
+function invS(){ _ick(['subs_all','subs_active','subs_expired','subs_weekly','subs_monthly','dash_today','dash_week','dash_month', INIT_CACHE_KEY, BOOT_CACHE_KEY]); }
+function invT(){ _ick(['tk_all','dash_today','dash_week','dash_month', INIT_CACHE_KEY, BOOT_CACHE_KEY]); }
+function invFB(){ _ick(['future_all', INIT_CACHE_KEY, BOOT_CACHE_KEY]); _resetFutureSheetCache(); }
 
 // ═══════════════════════════════════════════════════════════════
 // 3. SHEET ACCESS
 // ═══════════════════════════════════════════════════════════════
 
+function _getSS(){
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function _getSheetsMap(){
+  if(_SHEET_CACHE) return _SHEET_CACHE;
+  var ss = _getSS();
+  var all = ss.getSheets();
+  var map = {};
+  for(var i=0;i<all.length;i++){
+    map[all[i].getName()] = all[i];
+  }
+  _SHEET_CACHE = map;
+  return map;
+}
+
+function _resetSheetCaches(){
+  _SHEET_CACHE = null;
+  _SHEET_OBJECTS = {};
+}
+
+function _resetFutureSheetCache(){
+  _ensuredFutureSheet = null;
+}
+
 function sheet(name){
-  var ss=SpreadsheetApp.getActiveSpreadsheet();
-  var resolved=name;
-  var s = ss.getSheetByName(resolved);
-  if(!s && name===SHEET_NAMES.TAMKEEN){
-    var tamkeenAliases=['تمكين إنسان','برنامج تمكين إنسان','طلاب تمكين'];
-    for(var i=0;i<tamkeenAliases.length;i++){
-      s=ss.getSheetByName(tamkeenAliases[i]);
-      if(s){ resolved=tamkeenAliases[i]; break; }
-    }
-  }
+  if(_SHEET_OBJECTS[name]) return _SHEET_OBJECTS[name];
+  var s = _getSheetsMap()[name];
   if(!s) throw new Error('Sheet not found: ' + name);
-  // keep canonical constant synced once we discover the real tab name
-  if(name===SHEET_NAMES.TAMKEEN && resolved!==SHEET_NAMES.TAMKEEN){
-    SHEET_NAMES.TAMKEEN=resolved;
-  }
+  _SHEET_OBJECTS[name] = s;
   return s;
 }
 
 function readAll(name){
-  var s=sheet(name), lr=s.getLastRow(), lc=s.getLastColumn();
-  if(lr<=1||lc===0) return {sheet:s, rows:[], lr:lr};
+  var s = sheet(name);
+  var lr = s.getLastRow();
+  var lc = s.getLastColumn();
+  if(lr <= 1 || lc === 0) return {sheet:s, rows:[], lr:lr};
   return {sheet:s, rows:s.getRange(2,1,lr-1,lc).getValues(), lr:lr};
 }
 
-function readAllPadded(name,cols){
-  var res=readAll(name);
-  res.rows=res.rows.map(function(r){ while(r.length<cols) r.push(''); return r; });
-  return res;
+function readAllPadded(name, cols){
+  var s = sheet(name);
+  var lr = s.getLastRow();
+  if(lr <= 1) return {sheet:s, rows:[], lr:lr};
+  var rows = s.getRange(2,1,lr-1,cols).getValues();
+  return {sheet:s, rows:rows, lr:lr};
 }
 
-function writeRow(s,ri,row){ s.getRange(ri,1,1,row.length).setValues([row]); }
-function appendRow(s,row)  { s.getRange(s.getLastRow()+1,1,1,row.length).setValues([row]); }
+function writeRow(s, ri, row){
+  s.getRange(ri,1,1,row.length).setValues([row]);
+}
+
+function appendRow(s, row){
+  s.getRange(s.getLastRow()+1,1,1,row.length).setValues([row]);
+}
 
 // ── Ensure حجوزات مسبقة sheet exists ─────────────────────────
 function futureSheet(){
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if(_ensuredFutureSheet) return _ensuredFutureSheet;
+
+  var ss = _getSS();
   var s  = ss.getSheetByName(SHEET_NAMES.FUTURE);
   if(!s){
     s = ss.insertSheet(SHEET_NAMES.FUTURE);
@@ -139,23 +195,35 @@ function futureSheet(){
              'المصدر','التكلفة','طريقة الدفع','الحساب','مدفوع',
              'ملاحظات','المبلغ المدفوع','المبلغ المتبقي','تاريخ الحجز'];
     s.getRange(1,1,1,h.length).setValues([h])
-     .setBackground('#1e3a8a').setFontColor('#fff').setFontWeight('bold');
+     .setBackground('#1e3a8a')
+     .setFontColor('#fff')
+     .setFontWeight('bold');
+    _resetSheetCaches();
   }
+  _ensuredFutureSheet = s;
+  _SHEET_OBJECTS[SHEET_NAMES.FUTURE] = s;
   return s;
 }
 
 function subsSheet(){
-  var ss=SpreadsheetApp.getActiveSpreadsheet();
-  var s=ss.getSheetByName(SHEET_NAMES.SUBS);
+  if(_ensuredSubsSheet) return _ensuredSubsSheet;
+
+  var ss = _getSS();
+  var s = ss.getSheetByName(SHEET_NAMES.SUBS);
   if(!s){
-    s=ss.insertSheet(SHEET_NAMES.SUBS);
+    s = ss.insertSheet(SHEET_NAMES.SUBS);
     var h=['رقم الاشتراك','الاسم','الهاتف','المصدر','نوع الاشتراك','تاريخ البداية',
            'تاريخ الانتهاء','التكلفة','طريقة الدفع','الحساب','مدفوع','ملاحظات',
            'عدد الزيارات','آخر زيارة','الحالة','أرقام الزيارات','إجمالي الساعات',
            'المبلغ المدفوع','المبلغ المتبقي'];
     s.getRange(1,1,1,h.length).setValues([h])
-     .setBackground('#1e3a8a').setFontColor('#fff').setFontWeight('bold');
+     .setBackground('#1e3a8a')
+     .setFontColor('#fff')
+     .setFontWeight('bold');
+    _resetSheetCaches();
   }
+  _ensuredSubsSheet = s;
+  _SHEET_OBJECTS[SHEET_NAMES.SUBS] = s;
   return s;
 }
 
@@ -177,7 +245,6 @@ function addDays(dmy,n){
   d.setDate(d.getDate()+n);
   return fmtD(d);
 }
-
 function cleanSubType(v){
   var s=String(v||'').replace(/[\u200e\u200f\u061c]/g,'').trim();
   if(s==='اسبوعي') return 'أسبوعي';
@@ -209,10 +276,15 @@ function durBetween(ti,to){
 }
 
 function nextId(s){
-  var lr=s.getLastRow(); if(lr<=1) return 1;
-  var vals=s.getRange(2,1,lr-1,1).getValues();
-  var m=0; vals.forEach(function(r){ var v=parseInt(r[0])||0; if(v>m) m=v; });
-  return m+1;
+  var lr = s.getLastRow();
+  if(lr <= 1) return 1;
+  var vals = s.getRange(2,1,lr-1,1).getValues();
+  var m = 0, v;
+  for(var i=0;i<vals.length;i++){
+    v = vals[i][0];
+    if(v > m) m = v;
+  }
+  return (parseInt(m,10) || 0) + 1;
 }
 
 function payCalc(cost,paid,fullFlag){
@@ -220,10 +292,6 @@ function payCalc(cost,paid,fullFlag){
   var p=fullFlag?c:(parseFloat(paid)||0);
   var rem=Math.max(0,c-p);
   return{cost:c, paid:p, rem:rem, paidFlag:rem<=0&&c>0?'نعم':'لا'};
-}
-
-function asArray(v){
-  return Object.prototype.toString.call(v)==='[object Array]' ? v : [];
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -245,11 +313,13 @@ function mapVisitor(row,ri){
     day:String(row[V.DAY-1]||''),
     entryTime:toT(row[V.IN-1]), exitTime:toT(row[V.OUT-1]),
     duration:String(row[V.DUR-1]||''), durationH:parseFloat(row[V.DUR_H-1])||0,
-    subType:cleanSubType(row[V.TYPE-1]), pipeline:String(row[V.PIPE-1]||''),
+    subType:cleanSubType(row[V.TYPE-1]||''), pipeline:String(row[V.PIPE-1]||''),
     firstVisit:String(row[V.FIRST-1]||''), cost:String(row[V.COST-1]||''),
     payType:String(row[V.PAY_T-1]||''), account:String(row[V.ACCT-1]||''),
     paid:String(row[V.PAID-1]||'').trim(), notes:String(row[V.NOTES-1]||''),
-    amountPaid:ap, amountRemaining:ar, freezeTime:toT(row[V.FREEZE-1])
+    amountPaid:ap, amountRemaining:ar, freezeTime:toT(row[V.FREEZE-1]),
+    snack:parseFloat(row[V.SNACK-1])||0,
+    pureCost:parseFloat(row[V.PURE_COST-1])||0
   };
 }
 
@@ -284,16 +354,17 @@ function mapSub(row,ri){
     subId:row[S.ID-1]||'', name:String(row[S.NAME-1]||'').trim(),
     phone:String(row[S.PHONE-1]||'').trim(), pipeline:String(row[S.PIPE-1]||''),
     subType:cleanSubType(row[S.TYPE-1]), startDate:toD(row[S.START-1]),
+
     expiryDate:expiry, cost:String(row[S.COST-1]||''),
     payType:String(row[S.PAY_T-1]||''), account:String(row[S.ACCT-1]||''),
     paid:String(row[S.PAID-1]||'').trim(), notes:String(row[S.NOTES-1]||''),
     visitsCount:parseInt(row[S.VISITS-1])||0, lastVisit:toD(row[S.LAST_V-1]),
     visitIds:String(row[S.VIS_IDS-1]||''), totalHours:parseFloat(row[S.HOURS-1])||0,
-    amountPaid:ap, amountRemaining:ar, isExpired:isExp
+    amountPaid:ap, amountRemaining:ar, isExpired:isExp,
+    snack:parseFloat(row[S.SNACK-1])||0
   };
 }
 
-// ── Map future booking row ← NEW ──────────────────────────────
 function mapFutureBooking(row,ri){
   while(row.length<FBC) row.push('');
   var cost=parseFloat(row[FB.COST-1])||0;
@@ -306,7 +377,7 @@ function mapFutureBooking(row,ri){
     phone    : String(row[FB.PHONE-1]||'').trim(),
     date     : toD(row[FB.DATE-1]),
     day      : String(row[FB.DAY-1]||''),
-    subType  : cleanSubType(row[FB.TYPE-1]),
+    subType  : cleanSubType(row[FB.TYPE-1]||''),
     pipeline : String(row[FB.PIPE-1]||''),
     cost     : cost,
     payType  : String(row[FB.PAY_T-1]||''),
@@ -326,50 +397,88 @@ function mapFutureBooking(row,ri){
 function getVisitors(filter){
   var ck='vis_'+(filter||'all');
   var cached=_gc(ck); if(cached) return cached;
+
   var res=readAllPadded(SHEET_NAMES.VISITORS,VC);
   var today=fmtD(new Date()), result=[];
+
   for(var i=0;i<res.rows.length;i++){
-    var v=mapVisitor(res.rows[i],i+2); if(!v.name) continue;
-    // FIX: active visitors table must not include cancelled or future-dated rows.
-    if(v.exitTime==='����')                                                continue;
-    if(v.date && cmpDMY(v.date,today)>0)                                   continue;
-    if(filter==='today'  && v.date!==today)                           continue;
-    if(filter==='active' && v.exitTime!=='')                           continue;
-    if(filter==='hd'     && cleanSubType(v.subType)!=='ساعات'&&cleanSubType(v.subType)!=='يومي')  continue;
+    var v=mapVisitor(res.rows[i],i+2);
+    if(!v.name) continue;
+    if(v.exitTime==='ملغي') continue;
+    if(v.date && cmpDMY(v.date,today)>0) continue;
+    if(filter==='today'  && v.date!==today) continue;
+    if(filter==='active' && v.exitTime!=='') continue;
+    if(filter==='hd'     && v.cleanSubType!=='ساعات'&&v.cleanSubType!=='يومي') continue;
     result.push(v);
   }
-  result.reverse(); _sc(ck,result); return result;
+  result.reverse();
+  _sc(ck,result);
+  return result;
 }
 
 function lookupByName(name){
   if(!name||name.trim().length<2) return null;
   var nl=name.trim().toLowerCase();
-  var all=_gc('vis_all')||getVisitors('all');
-  var m=all.filter(function(v){ return v.name.toLowerCase()===nl; });
-  if(!m.length) return null;
-  return{name:m[0].name, phone:m[0].phone, pipeline:m[0].pipeline, subType:m[0].subType, visitCount:m.length};
-}
-
-function checkinVisitor(data){
-  if(!data.name||!data.phone||!data.subType||!data.pipeline)
-    return{success:false, error:'جميع الحقول مطلوبة'};
-  var phone=String(data.phone).trim();
-  var subType=cleanSubType(data.subType);
-  if(phone.replace(/\D/g,'').length<9) return{success:false, error:'رقم الهاتف غير صحيح'};
-
-  var s=sheet(SHEET_NAMES.VISITORS), lr=s.getLastRow(), today=fmtD(new Date()), isFirst=true;
-  if(lr>1){
-    var rows=s.getRange(2,1,lr-1,VC).getValues();
-    for(var i=0;i<rows.length;i++){
-      while(rows[i].length<VC) rows[i].push('');
-      var rp=String(rows[i][V.PHONE-1]||'').trim();
-      if(rp!==phone) continue;
-      isFirst=false;
-      if(toD(rows[i][V.DATE-1])===today && !toT(rows[i][V.OUT-1]) && cleanSubType(rows[i][V.TYPE-1])===subType)
-        return{success:false, error:'هذا الزائر لا يزال داخلاً — سجّل خروجه أولاً'};
+  if(!_VIS_NAME_INDEX_MEM){
+    _VIS_NAME_INDEX_MEM = _gc(VIS_NAME_INDEX_KEY);
+    if(!_VIS_NAME_INDEX_MEM){
+      var all=_gc('vis_all')||getVisitors('all');
+      var idx={};
+      for(var i=0;i<all.length;i++){
+        var v=all[i];
+        var key=String(v.name||'').trim().toLowerCase();
+        if(!key) continue;
+        if(!idx[key]){
+          idx[key]={name:v.name, phone:v.phone, pipeline:v.pipeline, subType:v.subType, visitCount:1};
+        }else{
+          idx[key].visitCount++;
+        }
+      }
+      _VIS_NAME_INDEX_MEM = idx;
+      _sc(VIS_NAME_INDEX_KEY, idx);
     }
   }
-  var t=now(), nid=nextId(s);
+  var hit=_VIS_NAME_INDEX_MEM[nl];
+  return hit ? {name:hit.name, phone:hit.phone, pipeline:hit.pipeline, subType:hit.subType, visitCount:hit.visitCount} : null;
+}
+
+
+
+
+function checkinVisitor(data){
+ if(!data.name)
+  return{success:false, error:'الاسم مطلوب'};
+if(!data.subType)
+  return{success:false, error:'نوع الاشتراك مطلوب'};
+
+  var phone=String(data.phone||'').trim();
+  var subType=cleanSubType(data.subType||'');
+
+  if(phone && phone.replace(/\D/g,'').length<9)
+    return{success:false, error:'رقم الهاتف غير صحيح'};
+
+  var s = sheet(SHEET_NAMES.VISITORS);
+  var lr = s.getLastRow();
+  var today = fmtD(new Date());
+  var isFirst = true;
+  // Read only needed columns for validation + ID generation (A:J).
+  var rows = lr > 1 ? s.getRange(2,1,lr-1,V.TYPE).getValues() : [];
+  var maxId = 0;
+
+  for(var i=0;i<rows.length;i++){
+    var rr = rows[i];
+    var rid = parseInt(rr[V.ID-1],10) || 0;
+    if(rid > maxId) maxId = rid;
+    var rp = String(rr[V.PHONE-1] || '').trim();
+    if(phone && rp !== phone) continue;
+    if(!phone && String(rr[V.NAME-1]||'').trim().toLowerCase() !== data.name.trim().toLowerCase()) continue;
+    isFirst = false;
+    if(toD(rr[V.DATE-1]) === today && !toT(rr[V.OUT-1]) && String(rr[V.TYPE-1] || '') === subType){
+      return{success:false, error:'هذا الزائر لا يزال داخلاً — سجّل خروجه أولاً'};
+    }
+  }
+
+  var t=now(), nid=(lr > 1 ? maxId + 1 : 1);
   var eDate=(data.entryDate&&/^\d{2}-\d{2}-\d{4}$/.test(data.entryDate))?data.entryDate:t.date;
   var eTime=(data.entryTime&&/^\d{2}:\d{2}/.test(data.entryTime))
     ?(data.entryTime.length===5?data.entryTime+':00':data.entryTime):t.time;
@@ -379,42 +488,64 @@ function checkinVisitor(data){
   var row=new Array(VC).fill('');
   row[V.ID-1]=nid; row[V.NAME-1]=data.name.trim(); row[V.PHONE-1]=phone;
   row[V.DATE-1]=eDate; row[V.DAY-1]=eDay; row[V.IN-1]=eTime;
-  row[V.TYPE-1]=subType; row[V.PIPE-1]=data.pipeline;
+  row[V.TYPE-1]=subType; row[V.PIPE-1]=data.pipeline||'';
   row[V.FIRST-1]=isFirst?'نعم':'لا'; row[V.NOTES-1]=(data.notes||'').trim();
   row[V.AMT_PAID-1]=0; row[V.AMT_REM-1]=0;
-  var nr=lr+1; writeRow(s,nr,row);
-  _upsertArchiveBatch(data.name.trim(),phone,data.pipeline,t.date);
+
+  var nr = s.getLastRow() + 1;
+  writeRow(s,nr,row);
+  _upsertArchiveBatch(data.name.trim(),phone,data.pipeline||'',t.date);
   invV();
+  _VIS_NAME_INDEX_MEM = null;
+
   return{success:true, id:nid, rowIndex:nr, isFirstVisit:isFirst, entryDate:eDate, entryTime:eTime, entryDay:eDay};
 }
 
+
 function checkoutVisitor(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,VC).getValues()[0]; while(row.length<VC) row.push('');
+  var row=s.getRange(ri,1,1,VC).getValues()[0];
+  while(row.length<VC) row.push('');
+
   if(!row[V.NAME-1]) return{success:false, error:'صف غير موجود'};
   if(row[V.OUT-1])   return{success:false, error:'سجّل خروجه مسبقاً'};
+
   var freeze=toT(row[V.FREEZE-1]);
   var entryD=toD(row[V.DATE-1]), entryTi=toT(row[V.IN-1]);
   if(!entryD||!entryTi) return{success:false, error:'تاريخ أو وقت الدخول غير صالح'};
+
   var dur = freeze ? durBetween(toT(row[V.IN-1]),freeze) : durNow(entryD,entryTi);
   if(!dur||isNaN(parseFloat(dur.decimal))) return{success:false, error:'تعذّر حساب المدة'};
+
   var exitT=freeze||fmtT(new Date());
   var pc=payCalc(data.cost,data.amountPaid,data.paid&&!data.amountPaid);
+
+  var snackAmt = parseFloat(row[V.SNACK-1]) || 0;
+  var pureCost = Math.max(0, pc.cost - snackAmt);
+
   row[V.OUT-1]=exitT; row[V.DUR-1]=dur.label; row[V.DUR_H-1]=dur.decimal;
   row[V.COST-1]=pc.cost; row[V.PAY_T-1]=data.payType||''; row[V.ACCT-1]=data.account||'';
   row[V.PAID-1]=pc.paidFlag; row[V.AMT_PAID-1]=pc.paid; row[V.AMT_REM-1]=pc.rem;
-  row[V.FREEZE-1]='';
-  writeRow(s,ri,row); invV();
+  row[V.FREEZE-1]=''; row[V.PURE_COST-1]=pureCost;
+
+  writeRow(s,ri,row);
+  invV();
+
   return{success:true, exitTime:exitT, duration:dur.label, durationH:dur.decimal,
          amountPaid:pc.paid, amountRemaining:pc.rem, paid:pc.paidFlag};
 }
 
 function updateVisitor(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,VC).getValues()[0]; while(row.length<VC) row.push('');
+  var row=s.getRange(ri,1,1,VC).getValues()[0];
+  while(row.length<VC) row.push('');
+
   if(!row[V.NAME-1]) return{success:false, error:'صف غير موجود'};
+
   if(data.name!==undefined)     row[V.NAME-1]=data.name;
   if(data.phone!==undefined)    row[V.PHONE-1]=data.phone;
   if(data.subType!==undefined)  row[V.TYPE-1]=data.subType;
@@ -422,6 +553,9 @@ function updateVisitor(data){
   if(data.payType!==undefined)  row[V.PAY_T-1]=data.payType;
   if(data.account!==undefined)  row[V.ACCT-1]=data.account;
   if(data.notes!==undefined)    row[V.NOTES-1]=data.notes;
+  if(data.snack!==undefined)    row[V.SNACK-1]=parseFloat(data.snack)||0;
+
+
   if(data.entryDate){
     row[V.DATE-1]=data.entryDate;
     var _ep=data.entryDate.split('-');
@@ -429,44 +563,156 @@ function updateVisitor(data){
   }
   if(data.entryTime) row[V.IN-1]=data.entryTime;
   if(data.exitTime)  row[V.OUT-1]=data.exitTime;
+
   var c=data.cost!==undefined?parseFloat(data.cost)||0:parseFloat(row[V.COST-1])||0;
   var p=data.amountPaid!==undefined?parseFloat(data.amountPaid)||0:parseFloat(row[V.AMT_PAID-1])||0;
   var rem=Math.max(0,c-p);
+
   row[V.COST-1]=c; row[V.AMT_PAID-1]=p; row[V.AMT_REM-1]=rem;
   row[V.PAID-1]=rem<=0&&c>0?'نعم':'لا';
   if(data.paid!==undefined) row[V.PAID-1]=data.paid;
+
   var ti=toT(row[V.IN-1]), to=toT(row[V.OUT-1]);
-  if(ti&&to){ var d=durBetween(ti,to); row[V.DUR-1]=d.label; row[V.DUR_H-1]=d.decimal; }
-  writeRow(s,ri,row); invV(); return{success:true};
+  if(ti&&to){
+    var d=durBetween(ti,to);
+    row[V.DUR-1]=d.label;
+    row[V.DUR_H-1]=d.decimal;
+  }
+
+  writeRow(s,ri,row);
+  invV();
+  return{success:true};
+}
+
+
+function addSnackToVisitor(data){
+  if(!data.rowIndex) return{success:false,error:'rowIndex مطلوب'};
+  var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.rowIndex);
+  var row=s.getRange(ri,1,1,VC).getValues()[0];
+  while(row.length<VC) row.push('');
+  if(!row[V.NAME-1]) return{success:false,error:'صف غير موجود'};
+
+  var adding=parseFloat(data.amount)||0;
+  if(adding<=0) return{success:false,error:'المبلغ يجب أن يكون أكبر من صفر'};
+
+  // تحديث SNACK — تراكمي
+  var currentSnack=parseFloat(row[V.SNACK-1])||0;
+  var newSnack=currentSnack+adding;
+  row[V.SNACK-1]=newSnack;
+
+  // تحديث cost — الإجمالي
+  var currentCost=parseFloat(row[V.COST-1])||0;
+  var newCost=currentCost+adding;
+  row[V.COST-1]=newCost;
+
+  // تحديث amountRemaining
+  var amtPaid=parseFloat(row[V.AMT_PAID-1])||0;
+  var newRem=Math.max(0,newCost-amtPaid);
+  row[V.AMT_REM-1]=newRem;
+  row[V.PAID-1]=newRem<=0&&newCost>0?'نعم':'لا';
+
+  // ملاحظة
+  var noteText=data.note?('سناك: '+data.note+' ₪'+adding):('سناك: ₪'+adding);
+  var existingNotes=String(row[V.NOTES-1]||'').trim();
+  row[V.NOTES-1]=existingNotes?existingNotes+' | '+noteText:noteText;
+
+  writeRow(s,ri,row);
+  invV();
+  return{success:true, snack:newSnack, cost:newCost, amountRemaining:newRem};
+}
+
+function addSnackToSubscription(data){
+  if(!data.rowIndex) return{success:false,error:'rowIndex مطلوب'};
+  
+  // data.rowIndex = subRowIndex, data.visitorRowIndex = صف الزيارة النشطة
+  if(!data.visitorRowIndex) return{success:false,error:'visitorRowIndex مطلوب'};
+  
+  var adding = parseFloat(data.amount)||0;
+  if(adding<=0) return{success:false,error:'المبلغ يجب أن يكون أكبر من صفر'};
+
+  // ── 1. حدّث SNACK في سجل الزوار ──────────────────────────
+  var vs = sheet(SHEET_NAMES.VISITORS);
+  var vri = parseInt(data.visitorRowIndex);
+  var vrow = vs.getRange(vri,1,1,VC).getValues()[0];
+  while(vrow.length<VC) vrow.push('');
+  if(!vrow[V.NAME-1]) return{success:false,error:'صف الزيارة غير موجود'};
+
+  var currentSnack = parseFloat(vrow[V.SNACK-1])||0;
+  var newSnack     = currentSnack + adding;
+  vrow[V.SNACK-1]  = newSnack;
+
+  var noteText = data.note ? ('سناك: '+data.note+' ₪'+adding) : ('سناك: ₪'+adding);
+  var existingNotes = String(vrow[V.NOTES-1]||'').trim();
+  vrow[V.NOTES-1] = existingNotes ? existingNotes+' | '+noteText : noteText;
+
+  writeRow(vs, vri, vrow);
+  invV();
+
+  // ── 2. حدّث COST في شيت الاشتراكات ──────────────────────
+  var ss  = subsSheet();
+  var sri = parseInt(data.rowIndex);
+  var srow = ss.getRange(sri,1,1,SC).getValues()[0];
+  while(srow.length<SC) srow.push('');
+  if(!srow[S.NAME-1]) return{success:false,error:'صف الاشتراك غير موجود'};
+
+  var c   = parseFloat(srow[S.COST-1])||0;
+  var ap  = parseFloat(srow[S.AMT_PAID-1])||0;
+  var newCost = c + adding;
+  var newRem  = Math.max(0, newCost - ap);
+
+  srow[S.COST-1]    = newCost;
+  srow[S.AMT_REM-1] = newRem;
+  srow[S.PAID-1]    = newRem<=0&&newCost>0?'نعم':'لا';
+  srow[S.NOTES-1]   = (String(srow[S.NOTES-1]||'').trim() ? srow[S.NOTES-1]+' | ' : '') + noteText;
+
+  writeRow(ss, sri, srow);
+  invS();
+
+  return{success:true, snack:newSnack, newCost:newCost, amountRemaining:newRem};
 }
 
 // ─── Time Freeze — Visitors ────────────────────────────────────
 
 function freezeVisitorTime(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,VC).getValues()[0]; while(row.length<VC) row.push('');
+  var row=s.getRange(ri,1,1,VC).getValues()[0];
+  while(row.length<VC) row.push('');
+
   if(!row[V.NAME-1])  return{success:false, error:'صف غير موجود'};
   if(row[V.OUT-1])    return{success:false, error:'الزائر خرج بالفعل'};
   if(row[V.FREEZE-1]) return{success:false, error:'الوقت مجمّد بالفعل'};
+
   var t=now();
   var dur=durNow(toD(row[V.DATE-1]),toT(row[V.IN-1]));
   row[V.FREEZE-1]=t.time;
-  writeRow(s,ri,row); invV();
+
+  writeRow(s,ri,row);
+  invV();
+
   return{success:true, freezeTime:t.time, durationSoFar:dur.label};
 }
 
 function unfreezeVisitorTime(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,VC).getValues()[0]; while(row.length<VC) row.push('');
+  var row=s.getRange(ri,1,1,VC).getValues()[0];
+  while(row.length<VC) row.push('');
+
   if(!row[V.NAME-1]) return{success:false, error:'صف غير موجود'};
   var freeze=toT(row[V.FREEZE-1]);
   if(!freeze) return{success:false, error:'الوقت غير مجمّد'};
+
   var durBefore=durBetween(toT(row[V.IN-1]),freeze);
   var newEntry=new Date(Date.now()-Math.round(durBefore.decimal*3600000));
-  row[V.IN-1]=fmtT(newEntry); row[V.FREEZE-1]='';
-  writeRow(s,ri,row); invV();
+  row[V.IN-1]=fmtT(newEntry);
+  row[V.FREEZE-1]='';
+
+  writeRow(s,ri,row);
+  invV();
+
   return{success:true, newEntryTime:fmtT(newEntry)};
 }
 
@@ -474,48 +720,74 @@ function unfreezeVisitorTime(data){
 
 function updatePayment(data){
   var ap=parseFloat(data.amountPaid)||0;
+
   if(data.type==='visitor'){
     var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.rowIndex);
-    var row=s.getRange(ri,1,1,VC).getValues()[0]; while(row.length<VC) row.push('');
+    var row=s.getRange(ri,1,1,VC).getValues()[0];
+    while(row.length<VC) row.push('');
+
     if(!row[V.NAME-1]) return{success:false, error:'صف غير موجود'};
+
     var c=parseFloat(row[V.COST-1])||0, rem=Math.max(0,c-ap);
     row[V.AMT_PAID-1]=ap; row[V.AMT_REM-1]=rem; row[V.PAID-1]=rem<=0&&c>0?'نعم':'لا';
     if(data.payType) row[V.PAY_T-1]=data.payType;
     if(data.account) row[V.ACCT-1]=data.account;
-    writeRow(s,ri,row); invV();
+
+    writeRow(s,ri,row);
+    invV();
     return{success:true, amountRemaining:rem, paid:row[V.PAID-1]};
   }
+
   if(data.type==='room'){
     var s2=sheet(SHEET_NAMES.ROOMS), ri2=parseInt(data.rowIndex);
-    var row2=s2.getRange(ri2,1,1,RC).getValues()[0]; while(row2.length<RC) row2.push('');
+    var row2=s2.getRange(ri2,1,1,RC).getValues()[0];
+    while(row2.length<RC) row2.push('');
+
     if(!row2[R.NAME-1]) return{success:false, error:'صف غير موجود'};
+
     var c2=parseFloat(row2[R.COST-1])||0, rem2=Math.max(0,c2-ap);
     row2[R.AMT_PAID-1]=ap; row2[R.AMT_REM-1]=rem2; row2[R.PAID-1]=rem2<=0&&c2>0?'نعم':'لا';
     if(data.payType) row2[R.PAY_T-1]=data.payType;
     if(data.account) row2[R.ACCT-1]=data.account;
-    writeRow(s2,ri2,row2); invR();
+
+    writeRow(s2,ri2,row2);
+    invR();
     return{success:true, amountRemaining:rem2, paid:row2[R.PAID-1]};
   }
+
   if(data.type==='sub'){
     var ss=subsSheet(), ri3=parseInt(data.rowIndex);
-    var row3=ss.getRange(ri3,1,1,SC).getValues()[0]; while(row3.length<SC) row3.push('');
+    var row3=ss.getRange(ri3,1,1,SC).getValues()[0];
+    while(row3.length<SC) row3.push('');
+
     if(!row3[S.NAME-1]) return{success:false, error:'صف غير موجود'};
+
     var c3=parseFloat(row3[S.COST-1])||0, rem3=Math.max(0,c3-ap);
     row3[S.AMT_PAID-1]=ap; row3[S.AMT_REM-1]=rem3; row3[S.PAID-1]=rem3<=0&&c3>0?'نعم':'لا';
-    writeRow(ss,ri3,row3); invS();
+
+    writeRow(ss,ri3,row3);
+    invS();
     return{success:true, amountRemaining:rem3, paid:row3[S.PAID-1]};
   }
+
+  if(data.type==='tamkeen_snack'){
+    var st=sheet(SHEET_NAMES.TAMKEEN), ri=parseInt(data.rowIndex);
+    var row=st.getRange(ri,1,1,TC).getValues()[0];
+    while(row.length<TC) row.push('');
+    if(!row[T.NAME-1]) return{success:false,error:'صف غير موجود'};
+    row[T.SNACK_PAID-1]='نعم';
+    writeRow(st,ri,row);
+    invT();
+    return{success:true,amountRemaining:0,paid:'نعم'};
+  }
+
   return{success:false, error:'نوع غير معروف'};
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 7. FUTURE BOOKINGS — حجوزات مسبقة  (NEW SECTION)
+// 7. FUTURE BOOKINGS — حجوزات مسبقة
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * أضف حجزاً مسبقاً جديداً في شيت "حجوزات مسبقة"
- * يُستدعى من فريق السوشيال عند تسجيل حجز لتاريخ مستقبلي
- */
 function addFutureBooking(data){
   if(!data.name||!data.phone||!data.date||!data.subType||!data.pipeline)
     return{success:false, error:'الاسم، الهاتف، التاريخ، نوع الاشتراك، والمصدر مطلوبة'};
@@ -524,11 +796,9 @@ function addFutureBooking(data){
   if(phone.replace(/\D/g,'').length<9)
     return{success:false, error:'رقم الهاتف غير صحيح'};
 
-  // تحويل التاريخ: YYYY-MM-DD → DD-MM-YYYY
   var dateStr=String(data.date);
   var dateDMY=/^\d{4}-\d{2}-\d{2}$/.test(dateStr)?ymdToDmy(dateStr):dateStr;
 
-  // منع الحجز المكرر: نفس الهاتف + نفس التاريخ
   var s=futureSheet(), lr=s.getLastRow();
   if(lr>1){
     var rows=s.getRange(2,1,lr-1,FBC).getValues();
@@ -552,7 +822,7 @@ function addFutureBooking(data){
   row[FB.PHONE-1]   = phone;
   row[FB.DATE-1]    = dateDMY;
   row[FB.DAY-1]     = eDay;
-  row[FB.TYPE-1]    = cleanSubType(data.subType);
+  row[FB.TYPE-1]    =  cleanSubType(data.subType);
   row[FB.PIPE-1]    = data.pipeline;
   row[FB.COST-1]    = pc.cost;
   row[FB.PAY_T-1]   = data.payType||'';
@@ -566,61 +836,53 @@ function addFutureBooking(data){
   var nr=s.getLastRow()+1;
   writeRow(s,nr,row);
   invFB();
+
   return{success:true, id:nid, rowIndex:nr, date:dateDMY, day:eDay};
 }
 
-/**
- * جلب جميع الحجوزات المسبقة
- * يظهر: مستقبلية + اليوم + آخر 3 أيام (نسيان الحضور)
- */
 function getFutureBookings(){
   var cached=_gc('future_all'); if(cached) return cached;
+
   var todayStr     =fmtD(new Date());
   var threeDaysBack=addDays(todayStr,-3);
   var res=readAllPadded(SHEET_NAMES.FUTURE,FBC);
   var result=[];
+
   for(var i=0;i<res.rows.length;i++){
     var fb=mapFutureBooking(res.rows[i],i+2);
     if(!fb.name) continue;
     var d=fb.date; if(!d) continue;
+
     var cmp=cmpDMY(d,todayStr);
-    // اليوم أو مستقبلي → يظهر دائماً
     if(cmp>=0){ result.push(fb); continue; }
-    // ماضٍ ضمن 3 أيام → يظهر (لم يحضر بعد)
     if(cmpDMY(d,threeDaysBack)>=0){ result.push(fb); }
   }
+
   result.sort(function(a,b){ return cmpDMY(a.date,b.date); });
   _sc('future_all',result);
   return result;
 }
 
-/**
- * تسجيل دخول زائر من الحجوزات المسبقة
- * 1. اقرأ بيانات الحجز من "حجوزات مسبقة"
- * 2. سجّل دخوله في "سجل الزوار" باليوم والوقت الحاليين
- * 3. احذف صفه من "حجوزات مسبقة"
- * atomic: إذا فشل checkin لا تحذف
- */
 function checkinFromFuture(data){
-  if(!data.futureRowIndex) return{success:false, error:'futureRowIndex �����'};
+  if(!data.futureRowIndex) return{success:false, error:'futureRowIndex مطلوب'};
+
   var fs=futureSheet(), fri=parseInt(data.futureRowIndex);
-  if(fri<2||fri>fs.getLastRow()) return{success:false, error:'����� ��� �����'};
+  if(fri<2||fri>fs.getLastRow()) return{success:false, error:'الحجز غير موجود'};
 
   var fbRow=fs.getRange(fri,1,1,FBC).getValues()[0];
   while(fbRow.length<FBC) fbRow.push('');
-  if(!fbRow[FB.NAME-1]) return{success:false, error:'������ ����� ��� ������'};
+  if(!fbRow[FB.NAME-1]) return{success:false, error:'الحجز غير موجود أو محذوف'};
 
   var fb=mapFutureBooking(fbRow,fri);
 
-  // FIX: weekly/monthly future bookings must go through subscriptions flow,
-  // so they appear in the correct weekly/monthly tables after "���� ����".
-  var subTypeRaw=cleanSubType(fb.subType);
-  var WEEKLY='\u0623\u0633\u0628\u0648\u0639\u064A';
-  var MONTHLY='\u0634\u0647\u0631\u064A';
-  var HOURLY='\u0633\u0627\u0639\u0627\u062A';
-  var DAILY='\u064A\u0648\u0645\u064A';
-  // FIX: avoid encoding issues by using unicode escapes for Arabic labels.
+ // var subTypeRaw=String(fb.subType||'').trim();
+   var subTypeRaw=cleanSubType(fb.subType);
+  var WEEKLY='أسبوعي';
+  var MONTHLY='شهري';
+  var HOURLY='ساعات';
+  var DAILY='يومي';
   var isSubFlow=(subTypeRaw===WEEKLY||subTypeRaw===MONTHLY||(subTypeRaw!==''&&subTypeRaw!==HOURLY&&subTypeRaw!==DAILY));
+
   if(isSubFlow){
     var validityDays=subTypeRaw===WEEKLY?7:30;
     var addSubRes=addSubscription({
@@ -667,7 +929,6 @@ function checkinFromFuture(data){
     };
   }
 
-  // non-subscription flow: direct visitor check-in (hours/daily)
   var ciResult=checkinVisitor({
     name     :fb.name,
     phone    :fb.phone,
@@ -696,9 +957,6 @@ function checkinFromFuture(data){
   };
 }
 
-/**
- * ����� ��� ���� � ��� ����� �� "������ �����"
- */
 function cancelFutureBooking(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
   var s=futureSheet(), ri=parseInt(data.rowIndex);
@@ -708,19 +966,21 @@ function cancelFutureBooking(data){
   return{success:true};
 }
 
-/**
- * تعديل حجز مسبق
- */
 function updateFutureBooking(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=futureSheet(), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,FBC).getValues()[0]; while(row.length<FBC) row.push('');
+  var row=s.getRange(ri,1,1,FBC).getValues()[0];
+  while(row.length<FBC) row.push('');
+
   if(!row[FB.NAME-1]) return{success:false, error:'الحجز غير موجود'};
+
   if(data.name!==undefined)    row[FB.NAME-1]=data.name;
   if(data.phone!==undefined)   row[FB.PHONE-1]=data.phone;
-  if(data.subType!==undefined) row[FB.TYPE-1]=cleanSubType(data.subType);
+  if(data.subType!==undefined) row[FB.TYPE-1]=data.subType;
   if(data.pipeline!==undefined)row[FB.PIPE-1]=data.pipeline;
   if(data.notes!==undefined)   row[FB.NOTES-1]=data.notes;
+
   if(data.date){
     var dateStr=String(data.date);
     var dateDMY=/^\d{4}-\d{2}-\d{2}$/.test(dateStr)?ymdToDmy(dateStr):dateStr;
@@ -728,12 +988,16 @@ function updateFutureBooking(data){
     var dp=dateDMY.split('-');
     row[FB.DAY-1]=dayName(new Date(+dp[2],+dp[1]-1,+dp[0]));
   }
+
   var c=data.cost!==undefined?parseFloat(data.cost)||0:parseFloat(row[FB.COST-1])||0;
   var p=data.amountPaid!==undefined?parseFloat(data.amountPaid)||0:parseFloat(row[FB.AMT_PAID-1])||0;
   var rem=Math.max(0,c-p);
+
   row[FB.COST-1]=c; row[FB.AMT_PAID-1]=p; row[FB.AMT_REM-1]=rem;
   row[FB.PAID-1]=rem<=0&&c>0?'نعم':'لا';
-  writeRow(s,ri,row); invFB();
+
+  writeRow(s,ri,row);
+  invFB();
   return{success:true};
 }
 
@@ -743,34 +1007,45 @@ function updateFutureBooking(data){
 
 function getSubscriptions(filter){
   var ck='subs_'+(filter||'all');
-  var cached=_gc(ck); if(cached) return asArray(cached);
+  var cached=_gc(ck); if(cached) return cached;
+
   var s=subsSheet(), lr=s.getLastRow();
   if(lr<=1) return [];
-  var lc=Math.max(s.getLastColumn(),SC);
-  var rows=s.getRange(2,1,lr-1,lc).getValues();
+
+  var rows=s.getRange(2,1,lr-1,SC).getValues();
   var result=[];
+
   for(var i=0;i<rows.length;i++){
-    var sub=mapSub(rows[i],i+2); if(!sub.name) continue;
-    if(filter==='active'  && sub.isExpired)         continue;
-    if(filter==='expired' && !sub.isExpired)         continue;
-    var subType=cleanSubType(sub.subType);
-    if(filter==='weekly'  && subType!=='أسبوعي') continue;
-    if(filter==='monthly' && subType!=='شهري')   continue;
+    var sub=mapSub(rows[i],i+2);
+    if(!sub.name) continue;
+    if(filter==='active'  && sub.isExpired) continue;
+    if(filter==='expired' && !sub.isExpired) continue;
+        var subType=cleanSubType(sub.subType);
+
+    if(filter==='weekly'  && sub.subType!=='أسبوعي') continue;
+    if(filter==='monthly' && sub.subType!=='شهري') continue;
     result.push(sub);
   }
-  result.reverse(); _sc(ck,result); return result;
+
+  result.reverse();
+  _sc(ck,result);
+  return result;
 }
 
 function addSubscription(data){
   if(!data.name||!data.phone||!data.subType||!data.startDate)
     return{success:false, error:'الاسم والهاتف ونوع الاشتراك وتاريخ البداية مطلوبة'};
+
   var startDmy=(data.startDate.split('-')[0].length===4)?ymdToDmy(data.startDate):data.startDate;
   var expDmy='';
+
   if(data.validityDays&&+data.validityDays>0) expDmy=addDays(startDmy,+data.validityDays);
   else if(data.expiryDate&&data.expiryDate!=='')
     expDmy=(data.expiryDate.split('-')[0].length===4)?ymdToDmy(data.expiryDate):data.expiryDate;
+
   var s=subsSheet(), nid=nextId(s);
   var pc=payCalc(data.cost,data.amountPaid,data.paid&&!data.amountPaid);
+
   var row=new Array(SC).fill('');
   row[S.ID-1]=nid; row[S.NAME-1]=data.name.trim(); row[S.PHONE-1]=String(data.phone).trim();
   row[S.PIPE-1]=data.pipeline||''; row[S.TYPE-1]=cleanSubType(data.subType);
@@ -780,65 +1055,112 @@ function addSubscription(data){
   row[S.VISITS-1]=0; row[S.LAST_V-1]=''; row[S.STATUS-1]='نشط';
   row[S.VIS_IDS-1]=''; row[S.HOURS-1]=0;
   row[S.AMT_PAID-1]=pc.paid; row[S.AMT_REM-1]=pc.rem;
-  var nr=s.getLastRow()+1; writeRow(s,nr,row);
+
+  var nr=s.getLastRow()+1;
+  writeRow(s,nr,row);
+
   invS();
   _upsertArchiveBatch(data.name.trim(),String(data.phone).trim(),data.pipeline||'',startDmy);
+
   return{success:true, subId:nid, rowIndex:nr, startDate:startDmy, expiryDate:expDmy};
 }
 
 function subCheckin(data){
-  if(!data.subRowIndex) return{success:false, error:'subRowIndex مطلوب'};
-  var ss=subsSheet(), si=parseInt(data.subRowIndex);
-  var srow=ss.getRange(si,1,1,SC).getValues()[0]; while(srow.length<SC) srow.push('');
-  var today=fmtD(new Date());
-  var expiry=toD(srow[S.EXPIRY-1]);
-  var isExp=expiry?cmpDMY(today,expiry)>0:false;
-  var name=String(srow[S.NAME-1]||'').trim(), phone=String(srow[S.PHONE-1]||'').trim();
+  if(!data.subRowIndex) return {success:false, error:'subRowIndex مطلوب'};
+
+  var ss = subsSheet(), si = parseInt(data.subRowIndex,10);
+  var srow = ss.getRange(si,1,1,SC).getValues()[0];
+  while(srow.length < SC) srow.push('');
+
+  var today = fmtD(new Date());
+  var expiry = toD(srow[S.EXPIRY-1]);
+  var isExp = expiry ? cmpDMY(today, expiry) > 0 : false;
+  var name = String(srow[S.NAME-1] || '').trim();
+  var phone = String(srow[S.PHONE-1] || '').trim();
   var subType=cleanSubType(srow[S.TYPE-1]), pipeline=String(srow[S.PIPE-1]||'');
-  if(isExp) return{success:false, expired:true,
-    error:'انتهت صلاحية اشتراك '+name+' بتاريخ '+expiry,
-    name:name, phone:phone, subType:subType, expiryDate:expiry};
-  var vs=sheet(SHEET_NAMES.VISITORS), evLr=vs.getLastRow();
-  if(evLr>1){
-    var visitIds=String(srow[S.VIS_IDS-1]||'');
+  var pipeline = String(srow[S.PIPE-1] || '');
+
+  if(isExp){
+    return {
+      success:false,
+      expired:true,
+      error:'انتهت صلاحية اشتراك ' + name + ' بتاريخ ' + expiry,
+      name:name,
+      phone:phone,
+      subType:subType,
+      expiryDate:expiry
+    };
+  }
+
+  var vs = sheet(SHEET_NAMES.VISITORS), evLr = vs.getLastRow();
+  if(evLr > 1){
+    var visitIds = String(srow[S.VIS_IDS-1] || '');
     if(visitIds){
-      var idArr=visitIds.split(',').map(function(x){return parseInt(x.trim());}).filter(Boolean);
-      var evRows=vs.getRange(2,1,evLr-1,VC).getValues();
+      var idArr = visitIds.split(',').map(function(x){ return parseInt(x.trim(),10); }).filter(Boolean);
+      var evRows = vs.getRange(2,1,evLr-1,VC).getValues();
       for(var i=0;i<idArr.length;i++){
-        var idx=idArr[i]-2;
-        if(idx>=0&&idx<evRows.length){
-          while(evRows[idx].length<VC) evRows[idx].push('');
-          if(toD(evRows[idx][V.DATE-1])===today&&!toT(evRows[idx][V.OUT-1]))
-            return{success:false, error:name+' لا يزال داخلاً اليوم'};
+        var idx = idArr[i] - 2;
+        if(idx >= 0 && idx < evRows.length){
+          while(evRows[idx].length < VC) evRows[idx].push('');
+          if(toD(evRows[idx][V.DATE-1]) === today && !toT(evRows[idx][V.OUT-1])){
+            return {success:false, error:name + ' لا يزال داخلاً اليوم'};
+          }
         }
       }
     }
   }
-  var t=now(), vid=nextId(vs), vr=vs.getLastRow()+1;
-  var vrow=new Array(VC).fill('');
-  vrow[V.ID-1]=vid; vrow[V.NAME-1]=name; vrow[V.PHONE-1]=phone;
-  vrow[V.DATE-1]=t.date; vrow[V.DAY-1]=t.day; vrow[V.IN-1]=t.time;
-  vrow[V.TYPE-1]=subType; vrow[V.PIPE-1]=pipeline;
-  vrow[V.FIRST-1]='لا'; vrow[V.COST-1]=0; vrow[V.PAID-1]='نعم';
-  vrow[V.AMT_PAID-1]=0; vrow[V.AMT_REM-1]=0;
-  writeRow(vs,vr,vrow);
-  var cnt=(parseInt(srow[S.VISITS-1])||0)+1;
-  var ids=String(srow[S.VIS_IDS-1]||''); ids=ids?ids+','+vr:String(vr);
-  ss.getRange(si,S.VISITS,1,1).setValues([[cnt]]);
-  ss.getRange(si,S.LAST_V,1,1).setValues([[t.date]]);
-  ss.getRange(si,S.VIS_IDS,1,1).setValues([[ids]]);
-  invV(); invS();
-  return{success:true, isExpired:false, expiryDate:expiry, visitorRowIndex:vr,
-         entryDate:t.date, entryTime:t.time, visitsCount:cnt};
+
+  var t = now(), vid = nextId(vs), vr = vs.getLastRow() + 1;
+  var vrow = new Array(VC).fill('');
+  vrow[V.ID-1] = vid;
+  vrow[V.NAME-1] = name;
+  vrow[V.PHONE-1] = phone;
+  vrow[V.DATE-1] = t.date;
+  vrow[V.DAY-1] = t.day;
+  vrow[V.IN-1] = t.time;
+  vrow[V.TYPE-1] = subType;
+  vrow[V.PIPE-1] = pipeline;
+  vrow[V.FIRST-1] = 'لا';
+  vrow[V.COST-1] = 0;
+  vrow[V.PAID-1] = 'نعم';
+  vrow[V.AMT_PAID-1] = 0;
+  vrow[V.AMT_REM-1] = 0;
+
+  writeRow(vs, vr, vrow);
+
+  var cnt = (parseInt(srow[S.VISITS-1],10) || 0) + 1;
+  var ids = String(srow[S.VIS_IDS-1] || '');
+  ids = ids ? ids + ',' + vr : String(vr);
+
+  srow[S.VISITS-1] = cnt;
+  srow[S.LAST_V-1] = t.date;
+  srow[S.VIS_IDS-1] = ids;
+  writeRow(ss, si, srow);
+
+  invV();
+  invS();
+
+  return {
+    success:true,
+    isExpired:false,
+    expiryDate:expiry,
+    visitorRowIndex:vr,
+    entryDate:t.date,
+    entryTime:t.time,
+    visitsCount:cnt
+  };
 }
 
 function subCheckout(data){
   var res=checkoutVisitor({rowIndex:data.visitorRowIndex,cost:0,amountPaid:0,payType:'',account:'',paid:true});
   if(!res.success) return res;
+
   if(data.subRowIndex&&res.durationH){
     try{
       var ss=subsSheet(), si=parseInt(data.subRowIndex);
-      var srow=ss.getRange(si,1,1,SC).getValues()[0]; while(srow.length<SC) srow.push('');
+      var srow=ss.getRange(si,1,1,SC).getValues()[0];
+      while(srow.length<SC) srow.push('');
+
       var visitIds=String(srow[S.VIS_IDS-1]||''), totalH=0;
       if(visitIds){
         var vs=sheet(SHEET_NAMES.VISITORS), vsLr=vs.getLastRow();
@@ -855,38 +1177,55 @@ function subCheckout(data){
       }
       ss.getRange(si,S.HOURS,1,1).setValues([[parseFloat(totalH.toFixed(2))]]);
       invS();
-    }catch(e){ Logger.log('subCheckout hours: '+e); }
+    }catch(e){
+      Logger.log('subCheckout hours: '+e);
+    }
   }
+
   return res;
 }
 
 function updateSubscription(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=subsSheet(), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,SC).getValues()[0]; while(row.length<SC) row.push('');
+  var row=s.getRange(ri,1,1,SC).getValues()[0];
+  while(row.length<SC) row.push('');
+
   if(!row[S.NAME-1]) return{success:false, error:'صف غير موجود'};
+
   if(data.name!==undefined)     row[S.NAME-1]=data.name;
   if(data.phone!==undefined)    row[S.PHONE-1]=data.phone;
   if(data.pipeline!==undefined) row[S.PIPE-1]=data.pipeline;
   if(data.payType!==undefined)  row[S.PAY_T-1]=data.payType;
   if(data.account!==undefined)  row[S.ACCT-1]=data.account;
   if(data.notes!==undefined)    row[S.NOTES-1]=data.notes;
+
   if(data.expiryDate&&data.expiryDate!=='')
     row[S.EXPIRY-1]=(data.expiryDate.split('-')[0].length===4)?ymdToDmy(data.expiryDate):data.expiryDate;
+
   var c=data.cost!==undefined?parseFloat(data.cost)||0:parseFloat(row[S.COST-1])||0;
   var p=data.amountPaid!==undefined?parseFloat(data.amountPaid)||0:parseFloat(row[S.AMT_PAID-1])||0;
   var rem=Math.max(0,c-p);
+
   row[S.COST-1]=c; row[S.AMT_PAID-1]=p; row[S.AMT_REM-1]=rem;
   row[S.PAID-1]=rem<=0&&c>0?'نعم':'لا';
   if(data.paid!==undefined) row[S.PAID-1]=data.paid;
-  writeRow(s,ri,row); invS(); return{success:true};
+
+  writeRow(s,ri,row);
+  invS();
+  return{success:true};
 }
 
 function updateSubVisitorTimes(data){
   if(!data.visitorRowIndex) return{success:false, error:'visitorRowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.VISITORS), ri=parseInt(data.visitorRowIndex);
-  var row=s.getRange(ri,1,1,VC).getValues()[0]; while(row.length<VC) row.push('');
+  var row=s.getRange(ri,1,1,VC).getValues()[0];
+  while(row.length<VC) row.push('');
+
   if(!row[V.NAME-1]) return{success:false, error:'صف غير موجود'};
+
   if(data.entryDate){
     row[V.DATE-1]=data.entryDate;
     var _ep=data.entryDate.split('-');
@@ -894,13 +1233,22 @@ function updateSubVisitorTimes(data){
   }
   if(data.entryTime) row[V.IN-1]=data.entryTime;
   if(data.exitTime)  row[V.OUT-1]=data.exitTime;
+
   var ti=toT(row[V.IN-1]), to=toT(row[V.OUT-1]);
-  if(ti&&to){ var d=durBetween(ti,to); row[V.DUR-1]=d.label; row[V.DUR_H-1]=d.decimal; }
+  if(ti&&to){
+    var d=durBetween(ti,to);
+    row[V.DUR-1]=d.label;
+    row[V.DUR_H-1]=d.decimal;
+  }
+
   writeRow(s,ri,row);
+
   if(data.subRowIndex){
     try{
       var ss=subsSheet(), si=parseInt(data.subRowIndex);
-      var srow=ss.getRange(si,1,1,SC).getValues()[0]; while(srow.length<SC) srow.push('');
+      var srow=ss.getRange(si,1,1,SC).getValues()[0];
+      while(srow.length<SC) srow.push('');
+
       var ids=String(srow[S.VIS_IDS-1]||''), totalH=0;
       if(ids){
         var vs=sheet(SHEET_NAMES.VISITORS), vsLr=vs.getLastRow();
@@ -919,6 +1267,7 @@ function updateSubVisitorTimes(data){
       invS();
     }catch(e){}
   }
+
   invV();
   return{success:true, duration:row[V.DUR-1]||'', durationH:row[V.DUR_H-1]||0};
 }
@@ -933,121 +1282,265 @@ function lookupSubByName(name){
 // 9. DASHBOARD
 // ═══════════════════════════════════════════════════════════════
 
-function getDashboardData(period){
-  var p=period||'today', ck='dash_'+p;
-  var cached=_gc(ck); if(cached) return cached;
+function getDashboardDataFromPrefetched(prefetched){
+  var p = prefetched.period || 'today';
+  var ck = 'dash_' + p;
+  var cached = _gc(ck);
+  if(cached) return cached;
 
-  var allV=getVisitors('all');
-  var allS=getSubscriptions('all');
-  var allT=getTamkeenStudents('all');
-  var todayStr=fmtD(new Date());
-  var todayD=new Date(); todayD.setHours(0,0,0,0);
+  var allV = prefetched.visitors || [];
+  var allS = prefetched.subscriptions || [];
+  var allT = prefetched.tamkeen || [];
+  var allRooms = prefetched.rooms || [];
+
+  var todayStr = fmtD(new Date());
+  var todayD = new Date();
+  todayD.setHours(0,0,0,0);
 
   function inP(ds){
     if(!ds) return false;
-    var pts=ds.split('-'); if(pts.length<3) return false;
-    var d=new Date(+pts[2],+pts[1]-1,+pts[0]); d.setHours(0,0,0,0);
-    if(p==='today') return d.getTime()===todayD.getTime();
-    if(p==='week'){var ws=new Date(todayD);ws.setDate(todayD.getDate()-6);return d>=ws&&d<=todayD;}
-    if(p==='month') return d.getMonth()===todayD.getMonth()&&d.getFullYear()===todayD.getFullYear();
+    var pts = ds.split('-');
+    if(pts.length < 3) return false;
+    var d = new Date(+pts[2],+pts[1]-1,+pts[0]);
+    d.setHours(0,0,0,0);
+    if(p === 'today') return d.getTime() === todayD.getTime();
+    if(p === 'week'){
+      var ws = new Date(todayD);
+      ws.setDate(todayD.getDate()-6);
+      return d >= ws && d <= todayD;
+    }
+    if(p === 'month') return d.getMonth() === todayD.getMonth() && d.getFullYear() === todayD.getFullYear();
     return false;
   }
 
-  var todayAndPast=allV.filter(function(v){
-    var d=v.date||v.entryDate||'';
-    return d && cmpDMY(d,todayStr)<=0 && v.exitTime!=='ملغي';
-  });
-  var periodV=todayAndPast.filter(function(v){return inP(v.date||v.entryDate);});
+  var todayAndPast = [];
+  for(var i=0;i<allV.length;i++){
+    var v = allV[i];
+    var d = v.date || v.entryDate || '';
+    if(d && cmpDMY(d,todayStr) <= 0 && v.exitTime !== 'ملغي') todayAndPast.push(v);
+  }
 
-  var activeF=allV.filter(function(v){
-    return (v.date||v.entryDate)===todayStr && !v.exitTime && v.pipeline!=='برنامج تمكين إنسان';
-  });
-  var activeT=allT.filter(function(s){return !s.date&&s.timeIn&&!s.timeOut;});
+  var periodV = [];
+  for(var j=0;j<todayAndPast.length;j++){
+    if(inP(todayAndPast[j].date || todayAndPast[j].entryDate)) periodV.push(todayAndPast[j]);
+  }
 
-  var occupied=activeF.length, available=Math.max(0,TOTAL_CHAIRS-occupied);
+  var activeF = [];
+  for(var k=0;k<allV.length;k++){
+    var av = allV[k];
+    if((av.date || av.entryDate) === todayStr && !av.exitTime && av.pipeline !== 'برنامج تمكين إنسان'){
+      activeF.push(av);
+    }
+  }
 
-  var freelanceV=periodV.filter(function(v){
-    return v.pipeline!=='برنامج تمكين إنسان'
-        && v.subType!=='أسبوعي'
-        && v.subType!=='شهري';
-  });
-  var tkToday=allT.filter(function(s){return !s.date&&s.todayDate&&inP(s.todayDate);});
+  var activeT = [];
+  for(var m=0;m<allT.length;m++){
+    var at = allT[m];
+    if(!at.date && at.timeIn && !at.timeOut) activeT.push(at);
+  }
 
-  var fH=0,tH=0,rH=0;
-  freelanceV.forEach(function(v){fH+=parseFloat(v.durationH)||0;});
-  tkToday.forEach(function(s){
-    var ti=s.timeIn,to=s.timeOut;
-    if(ti&&to){var a=ti.split(':'),b=to.split(':');tH+=Math.max(0,(+b[0]*60+ +b[1])-(+a[0]*60+ +a[1]))/60;}
-  });
+  var occupied = activeF.length;
+  var available = Math.max(0, TOTAL_CHAIRS - occupied);
 
-  var allRooms=getFilteredBookings('all');
-  var rooms=allRooms.filter(function(r){ return inP(r.date); });
-  rooms.forEach(function(r){rH+=r.diffMin/60;});
+  var freelanceV = [];
+  for(var n=0;n<periodV.length;n++){
+    var fv = periodV[n];
+    if(fv.pipeline !== 'برنامج تمكين إنسان' && fv.subType !== 'أسبوعي' && fv.subType !== 'شهري'){
+      freelanceV.push(fv);
+    }
+  }
+
+  var tkToday = [];
+  for(var a=0;a<allT.length;a++){
+    var tk = allT[a];
+    if(!tk.date && tk.todayDate && inP(tk.todayDate)) tkToday.push(tk);
+  }
+
+  var rooms = [];
+  for(var b=0;b<allRooms.length;b++){
+    if(inP(allRooms[b].date)) rooms.push(allRooms[b]);
+  }
+
+  var fH=0,tH=0,rH=0 ,snackRev=0;
+  for(var c=0;c<freelanceV.length;c++) fH += parseFloat(freelanceV[c].durationH) || 0;
+
+  for(var d1=0;d1<tkToday.length;d1++){
+    var ti = tkToday[d1].timeIn, to = tkToday[d1].timeOut;
+    if(ti && to){
+      var a1 = ti.split(':'), b1 = to.split(':');
+      tH += Math.max(0,(+b1[0]*60 + +b1[1]) - (+a1[0]*60 + +a1[1])) / 60;
+    }
+    //  -- 
+    var tkSnk = parseFloat(tkToday[d1].snack)||0;
+    if(tkSnk > 0) snackRev += tkSnk;
+  }
+
+
+  
+
+  for(var e=0;e<rooms.length;e++) rH += (rooms[e].diffMin || 0) / 60;
 
   var hourlyRev=0, dailyRev=0, weeklyRev=0, monthlyRev=0;
   var fRev=0, tRev=0, rRev=0;
   var fColl=0, fPend=0, sColl=0, sPend=0, rColl=0, rPend=0;
 
-  freelanceV.forEach(function(v){
-    var c=parseFloat(v.cost)||0;
-    fRev+=c;
-    fColl+=parseFloat(v.amountPaid)||0;
-    fPend+=parseFloat(v.amountRemaining)||0;
-    if(v.subType==='ساعات') hourlyRev+=c;
-    else if(v.subType==='يومي') dailyRev+=c;
-  });
+   for(var f=0;f<freelanceV.length;f++){
+    var v1  = freelanceV[f];
+    var cst = parseFloat(v1.cost) || 0;
+    var snk = parseFloat(v1.snack) || 0;
+    var pureCost = cst - snk;
 
-  var periodS=allS.filter(function(s){ return inP(s.startDate); });
-  periodS.forEach(function(s){
-    var c=parseFloat(s.cost)||0;
-    var paid=parseFloat(s.amountPaid)||0;
-    var rem=parseFloat(s.amountRemaining)||0;
-    if(isNaN(rem)) rem=Math.max(0,c-paid);
-    sColl+=paid; sPend+=rem;
-    if(s.subType==='أسبوعي') weeklyRev+=c;
-    else if(s.subType==='شهري') monthlyRev+=c;
-  });
+    fRev  += pureCost;
+    fColl += parseFloat(v1.amountPaid) || 0;
+    fPend += parseFloat(v1.amountRemaining) || 0;
+    snackRev += snk;
 
-  tkToday.forEach(function(s){tRev+=parseFloat(s.cost)||0;});
-
-  rooms.forEach(function(r){
-    rRev+=parseFloat(r.revenue)||0;
-    rColl+=parseFloat(r.amountPaid)||0;
-    rPend+=parseFloat(r.amountRemaining)||0;
-  });
-
-  fColl=parseFloat(fColl.toFixed(2));
-  var totalColl=parseFloat((fColl+sColl+rColl).toFixed(2));
-  var totalPend=parseFloat((fPend+sPend+rPend).toFixed(2));
-
-  function mkUnpaid(items,type,dateFn,typeFn,costFn){
-    return items.filter(function(x){
-      var rem=parseFloat(x.amountRemaining)||0;
-      var cost=parseFloat(costFn(x))||0;
-      return rem>0||(String(x.paid||'').trim()!=='نعم'&&cost>0);
-    }).map(function(x){
-      var cost=parseFloat(costFn(x))||0;
-      var paid=parseFloat(x.amountPaid)||0;
-      var rem=isNaN(parseFloat(x.amountRemaining))?Math.max(0,cost-paid):parseFloat(x.amountRemaining);
-      return{rowIndex:x.ri||x.rowIndex||0,name:x.name,phone:x.phone,
-             entryDate:dateFn(x),subType:typeFn(x),payType:x.payType||'',
-             cost:String(cost),amountPaid:paid,amountRemaining:rem,type:type};
-    });
+    if(v1.subType === 'ساعات')     hourlyRev += pureCost;
+    else if(v1.subType === 'يومي') dailyRev  += pureCost;
   }
 
-  var unpaidV=mkUnpaid(
-    allV.filter(function(v){return v.subType!=='أسبوعي'&&v.subType!=='شهري'&&v.exitTime!=='ملغي';}),
-    'visitor',function(v){return v.date||v.entryDate||'';},
-    function(v){return v.subType;},function(v){return v.cost;}
-  );
-  var unpaidR=mkUnpaid(allRooms,'room',
-    function(r){return r.date;},function(r){return 'قاعة '+r.hall;},function(r){return r.revenue;});
-  var unpaidS=mkUnpaid(allS,'sub',
-    function(s){return s.startDate;},function(s){return s.subType;},function(s){return s.cost;});
+  // ── سناك الاشتراكات من سجل الزوار + تجميع حسب (الاسم+الهاتف)
+  // لتفادي حلقة تربيعية عند حساب كل اشتراك.
+  var subSnackByKey = {};
+  for(var fs=0;fs<periodV.length;fs++){
+    var vs1 = periodV[fs];
+    if(vs1.subType !== 'أسبوعي' && vs1.subType !== 'شهري') continue;
+    var snkS = parseFloat(vs1.snack)||0;
+    if(snkS > 0){
+      snackRev += snkS;
+      var snackKey = String(vs1.name||'').trim() + '||' + String(vs1.phone||'').trim();
+      subSnackByKey[snackKey] = (subSnackByKey[snackKey] || 0) + snkS;
+    }
+  }
 
-  var result={
+  for(var g=0;g<allS.length;g++){
+    var s1 = allS[g];
+    if(!inP(s1.startDate)) continue;
+    var c2    = parseFloat(s1.cost) || 0;
+    
+    var paid2 = parseFloat(s1.amountPaid) || 0;
+    var rem2  = parseFloat(s1.amountRemaining);
+    if(isNaN(rem2)) rem2 = Math.max(0, c2 - paid2);
+
+    var subKey = String(s1.name||'').trim() + '||' + String(s1.phone||'').trim();
+    var subSnack = subSnackByKey[subKey] || 0;
+
+    var purePaid = Math.max(0, paid2 - subSnack);
+    var pureRem  = Math.max(0, rem2  - subSnack);
+
+    sColl += purePaid;
+    sPend += pureRem;
+
+    if(s1.subType === 'أسبوعي') weeklyRev += Math.max(0, c2 - subSnack);
+    else if(s1.subType === 'شهري') monthlyRev += Math.max(0, c2 - subSnack);
+  }
+
+  for(var h=0;h<tkToday.length;h++) tRev += parseFloat(tkToday[h].cost) || 0;
+
+  for(var i1=0;i1<rooms.length;i1++){
+    var r1 = rooms[i1];
+    rRev += parseFloat(r1.revenue) || 0;
+    rColl += parseFloat(r1.amountPaid) || 0;
+    rPend += parseFloat(r1.amountRemaining) || 0;
+  }
+
+  fColl = parseFloat(fColl.toFixed(2));
+  
+
+  // حساب سناك تمكين غير المدفوع
+  var tkSnackPend = 0;
+  for(var tsp=0;tsp<allT.length;tsp++){
+    var tspItem=allT[tsp];
+    if(parseFloat(tspItem.snack)>0 && tspItem.snackPaid!=='نعم' && tspItem.todayDate && inP(tspItem.todayDate)){
+      tkSnackPend += parseFloat(tspItem.snack)||0;
+    }
+  }
+  var totalColl = parseFloat((fColl + sColl + rColl).toFixed(2));
+  var totalPend = parseFloat((fPend + sPend + rPend + tkSnackPend).toFixed(2));
+
+
+  function mkUnpaid(items, type, dateFn, typeFn, costFn){
+    var out = [];
+    for(var z=0;z<items.length;z++){
+      var x = items[z];
+      var rem = parseFloat(x.amountRemaining) || 0;
+      var cost = parseFloat(costFn(x)) || 0;
+      if(!(rem > 0 || (String(x.paid || '').trim() !== 'نعم' && cost > 0))) continue;
+
+      var paid = parseFloat(x.amountPaid) || 0;
+      var finalRem = isNaN(parseFloat(x.amountRemaining)) ? Math.max(0, cost - paid) : parseFloat(x.amountRemaining);
+
+      out.push({
+        rowIndex: x.ri || x.rowIndex || 0,
+        name: x.name,
+        phone: x.phone,
+        entryDate: dateFn(x),
+        subType: typeFn(x),
+        payType: x.payType || '',
+        cost: String(cost),
+        amountPaid: paid,
+        amountRemaining: finalRem,
+        type: type
+      });
+    }
+    return out;
+  }
+
+  var unpaidV = mkUnpaid(
+    allV.filter(function(v){
+      
+      return v.subType !== 'أسبوعي'
+          && v.subType !== 'شهري'
+          && v.exitTime !== 'ملغي'
+          && (parseFloat(v.amountRemaining) > 0
+             || (!v.exitTime)
+             || (String(v.paid||'').trim() !== 'نعم'
+             && (parseFloat(v.cost)||0) > 0));
+    }),
+    'visitor',
+    function(v){ return v.date || v.entryDate || ''; },
+    function(v){ return v.subType; },
+    function(v){ return v.cost; }
+  );
+
+  var unpaidR = mkUnpaid(
+    allRooms,
+    'room',
+    function(r){ return r.date; },
+    function(r){ return 'قاعة ' + r.hall; },
+    function(r){ return r.revenue; }
+  );
+
+  var unpaidS = mkUnpaid(
+    allS,
+    'sub',
+    function(s){ return s.startDate; },
+    function(s){ return s.subType; },
+    function(s){ return s.cost; }
+  );
+
+   var unpaidTkSnack=[];
+  for(var tks=0;tks<allT.length;tks++){
+    var tkItem=allT[tks];
+    var tkSnkAmt=parseFloat(tkItem.snack)||0;
+    if(tkSnkAmt>0 && tkItem.snackPaid!=='نعم'){
+      unpaidTkSnack.push({
+        rowIndex        : tkItem.attendanceRowIndex||tkItem.rowIndex||0,
+        name            : tkItem.name,
+        phone           : tkItem.phone||'',
+        entryDate       : tkItem.todayDate||'',
+        subType         : 'سناك تمكين',
+        cost            : String(tkSnkAmt),
+        amountPaid      : 0,
+        amountRemaining : tkSnkAmt,
+        type            : 'tamkeen_snack'
+      });
+    }
+  }
+
+  var result = {
     period:p,
-    totalVisitors    : periodV.length+tkToday.length,
+    totalVisitors    : periodV.length + tkToday.length,
     freelanceVisitors: freelanceV.length,
     tamkeenVisitors  : tkToday.length,
     activeVisitors   : activeF.length,
@@ -1060,7 +1553,9 @@ function getDashboardData(period){
     hallHours        : parseFloat(rH.toFixed(1)),
     totalHours       : parseFloat((fH+tH+rH).toFixed(1)),
     hallBookings     : rooms.length,
-    totalRevenue     : parseFloat((fRev+tRev+rRev+weeklyRev+monthlyRev).toFixed(2)),
+    snackRevenue     : parseFloat(snackRev.toFixed(2)),
+    totalRevenue     : parseFloat((fRev+tRev+rRev+weeklyRev+monthlyRev+snackRev).toFixed(2)),
+
     freelanceRevenue : parseFloat(fRev.toFixed(2)),
     hourlyRevenue    : parseFloat(hourlyRev.toFixed(2)),
     dailyRevenue     : parseFloat(dailyRev.toFixed(2)),
@@ -1076,10 +1571,27 @@ function getDashboardData(period){
     subsPending      : parseFloat(sPend.toFixed(2)),
     hallsCollected   : parseFloat(rColl.toFixed(2)),
     hallsPending     : parseFloat(rPend.toFixed(2)),
-    todayVisits      : allV.filter(function(v){return (v.date||v.entryDate)===todayStr&&v.exitTime!=='ملغي';}),
-    unpaidList       : unpaidV.concat(unpaidR).concat(unpaidS)
+    todayVisits      : allV.filter(function(v){ return (v.date || v.entryDate) === todayStr && v.exitTime !== 'ملغي'; }),
+    unpaidList: unpaidV.concat(unpaidR).concat(unpaidS).concat(unpaidTkSnack)
   };
-  _sc(ck,result); return result;
+
+  _sc(ck, result);
+  return result;
+}
+
+function getDashboardData(period){
+  var p = period || 'today';
+  var ck = 'dash_' + p;
+  var cached = _gc(ck);
+  if(cached) return cached;
+
+  return getDashboardDataFromPrefetched({
+    visitors: getVisitors('all'),
+    subscriptions: getSubscriptions('all'),
+    tamkeen: getTamkeenStudents('all'),
+    rooms: getFilteredBookings('all'),
+    period: p
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1089,15 +1601,19 @@ function getDashboardData(period){
 function addNewBooking(data){
   if(!data.hall||!data.name||!data.date||!data.start||!data.end)
     return{success:false, error:'يرجى تعبئة جميع الحقول المطلوبة'};
+
   if(data.chairs&&+data.chairs>16) return{success:false, error:'الحد الأقصى للكراسي 16'};
+
   var dp=data.date.split('-');
   var fmtDate=dp[2]+'-'+dp[1]+'-'+dp[0];
   var sp=data.start.split(':'), ep=data.end.split(':');
   var diff=(+ep[0]*60+ +ep[1])-(+sp[0]*60+ +sp[1]);
   if(diff<=0) return{success:false, error:'وقت النهاية يجب أن يكون بعد البداية'};
+
   var dur=Math.floor(diff/60)+'س '+(diff%60>0?diff%60+'د':'');
   var s=sheet(SHEET_NAMES.ROOMS), nid=nextId(s);
   var pc=payCalc(data.revenue,data.amountPaid,data.paid&&!data.amountPaid);
+
   var row=new Array(RC).fill('');
   row[R.ID-1]=nid; row[R.NAME-1]=data.name.trim(); row[R.PHONE-1]=data.phone||'';
   row[R.ROOM-1]=data.hall; row[R.PIPE-1]=data.pipeline||'';
@@ -1106,34 +1622,47 @@ function addNewBooking(data){
   row[R.COST-1]=pc.cost; row[R.PAY_T-1]=data.payType||'';
   row[R.PAID-1]=pc.paidFlag; row[R.NOTES-1]=data.chairs?'كراسي: '+data.chairs:'';
   row[R.AMT_PAID-1]=pc.paid; row[R.AMT_REM-1]=pc.rem;
-  var nr=s.getLastRow()+1; writeRow(s,nr,row); invR();
+
+  var nr=s.getLastRow()+1;
+  writeRow(s,nr,row);
+  invR();
+
   return{success:true, rowIndex:nr, date:fmtDate, duration:dur};
 }
 
 function getFilteredBookings(period){
   var p=period||'today', ck='rooms_'+p;
   var cached=_gc(ck); if(cached) return cached;
+
   var res=readAllPadded(SHEET_NAMES.ROOMS,RC);
   var today=new Date(); today.setHours(0,0,0,0);
   var result=[];
+
   for(var i=0;i<res.rows.length;i++){
     var row=res.rows[i];
     var ds=toD(row[R.DATE-1]); if(!ds) continue;
+
     var dp=ds.split('-'), rd=new Date(+dp[2],+dp[1]-1,+dp[0]); rd.setHours(0,0,0,0);
     var inc=false;
+
     if(p==='today') inc=rd.getTime()===today.getTime();
     else if(p==='week'){ var ws=new Date(today); ws.setDate(today.getDate()-6); inc=rd>=ws&&rd<=today; }
     else if(p==='month') inc=rd.getMonth()===today.getMonth()&&rd.getFullYear()===today.getFullYear();
     else inc=true;
+
     if(!inc) continue;
+
     var st=toT(row[R.START-1]), en=toT(row[R.END-1]);
     var sp2=st.split(':'), ep2=en.split(':');
     var diff2=Math.max(0,(+ep2[0]*60+ +ep2[1])-(+sp2[0]*60+ +sp2[1]));
+
     var notes=String(row[R.NOTES-1]||'');
     var chairs=''; var m=notes.match(/كراسي:\s*(\d+)/); if(m) chairs=m[1];
+
     var cost=parseFloat(row[R.COST-1])||0;
     var ap=parseFloat(row[R.AMT_PAID-1])||0;
     var ar=isNaN(parseFloat(row[R.AMT_REM-1]))?Math.max(0,cost-ap):parseFloat(row[R.AMT_REM-1]);
+
     result.push({
       rowIndex:i+2, hall:String(row[R.ROOM-1]||''),
       name:String(row[R.NAME-1]||'').trim(), phone:String(row[R.PHONE-1]||'').trim(),
@@ -1145,23 +1674,31 @@ function getFilteredBookings(period){
       amountPaid:ap, amountRemaining:ar
     });
   }
-  result.reverse(); _sc(ck,result); return result;
+
+  result.reverse();
+  _sc(ck,result);
+  return result;
 }
 
 function getFutureHallBookings(){
   var cached=_gc('rooms_future'); if(cached) return cached;
+
   var todayStr=fmtD(new Date());
   var res=readAllPadded(SHEET_NAMES.ROOMS,RC);
   var result=[];
+
   for(var i=0;i<res.rows.length;i++){
     var row=res.rows[i];
     var ds=toD(row[R.DATE-1]); if(!ds) continue;
     if(cmpDMY(ds,todayStr)<0) continue;
+
     var cost=parseFloat(row[R.COST-1])||0;
     var ap=parseFloat(row[R.AMT_PAID-1])||0;
     var ar=isNaN(parseFloat(row[R.AMT_REM-1]))?Math.max(0,cost-ap):parseFloat(row[R.AMT_REM-1]);
+
     var notes=String(row[R.NOTES-1]||'');
     var chairs=''; var m=notes.match(/كراسي:\s*(\d+)/); if(m) chairs=m[1];
+
     result.push({
       rowIndex:i+2, name:String(row[R.NAME-1]||'').trim(),
       phone:String(row[R.PHONE-1]||'').trim(), hall:String(row[R.ROOM-1]||''),
@@ -1172,6 +1709,7 @@ function getFutureHallBookings(){
       paid:String(row[R.PAID-1]||'').trim(), payType:String(row[R.PAY_T-1]||'')
     });
   }
+
   result.sort(function(a,b){ return cmpDMY(a.date,b.date); });
   _sc('rooms_future',result);
   return result;
@@ -1179,29 +1717,40 @@ function getFutureHallBookings(){
 
 function updateRoom(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.ROOMS), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,RC).getValues()[0]; while(row.length<RC) row.push('');
+  var row=s.getRange(ri,1,1,RC).getValues()[0];
+  while(row.length<RC) row.push('');
+
   if(!row[R.NAME-1]) return{success:false, error:'صف غير موجود'};
+
   if(data.name!==undefined)     row[R.NAME-1]=data.name;
   if(data.phone!==undefined)    row[R.PHONE-1]=data.phone;
   if(data.room!==undefined)     row[R.ROOM-1]=data.room;
   if(data.pipeline!==undefined) row[R.PIPE-1]=data.pipeline;
   if(data.payType!==undefined)  row[R.PAY_T-1]=data.payType;
   if(data.notes!==undefined)    row[R.NOTES-1]=data.notes;
+
   var c=data.cost!==undefined?parseFloat(data.cost)||0:parseFloat(row[R.COST-1])||0;
   var p=data.amountPaid!==undefined?parseFloat(data.amountPaid)||0:parseFloat(row[R.AMT_PAID-1])||0;
   var rem=Math.max(0,c-p);
+
   row[R.COST-1]=c; row[R.AMT_PAID-1]=p; row[R.AMT_REM-1]=rem;
   row[R.PAID-1]=rem<=0&&c>0?'نعم':'لا';
   if(data.paid!==undefined) row[R.PAID-1]=data.paid;
-  writeRow(s,ri,row); invR(); return{success:true};
+
+  writeRow(s,ri,row);
+  invR();
+  return{success:true};
 }
 
 function deleteRoom(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
   var s=sheet(SHEET_NAMES.ROOMS), ri=parseInt(data.rowIndex);
   if(ri<2||ri>s.getLastRow()) return{success:false, error:'السطر غير موجود'};
-  s.deleteRow(ri); invR(); return{success:true};
+  s.deleteRow(ri);
+  invR();
+  return{success:true};
 }
 function deleteBooking(data){ return deleteRoom(data); }
 
@@ -1217,42 +1766,67 @@ function _upsertArchiveBatch(name,phone,pipeline,date){
 
 function _flushArchive(){
   if(!_archivePending.length) return;
-  var s=sheet(SHEET_NAMES.ARCHIVE), lr=s.getLastRow();
-  var existing=lr>1?s.getRange(2,1,lr-1,6).getValues():[];
-  var toAdd=[];
-  _archivePending.forEach(function(item){
-    var nl=item.name.toLowerCase(), ph=String(item.phone).trim();
-    var found=-1;
-    for(var i=0;i<existing.length;i++){
-      if(String(existing[i][0]||'').trim().toLowerCase()===nl&&String(existing[i][1]||'').trim()===ph){
-        found=i; break;
-      }
-    }
-    if(found===-1){
-      toAdd.push([item.name,item.phone,item.date,item.date,1,item.pipeline]);
-    } else {
-      existing[found][3]=item.date;
-      existing[found][4]=(parseInt(existing[found][4])||0)+1;
-      s.getRange(found+2,1,1,6).setValues([existing[found]]);
-    }
-  });
-  if(toAdd.length){
-    var startRow=s.getLastRow()+1;
-    s.getRange(startRow,1,toAdd.length,6).setValues(toAdd);
+
+  var s = sheet(SHEET_NAMES.ARCHIVE);
+  var lr = s.getLastRow();
+  var existing = lr > 1 ? s.getRange(2,1,lr-1,6).getValues() : [];
+
+  var indexMap = {};
+  for(var i=0;i<existing.length;i++){
+    var key = String(existing[i][0] || '').trim().toLowerCase() + '||' + String(existing[i][1] || '').trim();
+    indexMap[key] = i;
   }
+
+  var toAdd = [];
+
+  for(var j=0;j<_archivePending.length;j++){
+    var item = _archivePending[j];
+    var key2 = String(item.name || '').trim().toLowerCase() + '||' + String(item.phone || '').trim();
+
+    if(indexMap.hasOwnProperty(key2)){
+      var idx = indexMap[key2];
+      existing[idx][3] = item.date;
+      existing[idx][4] = (parseInt(existing[idx][4],10) || 0) + 1;
+      if(item.pipeline && !existing[idx][5]) existing[idx][5] = item.pipeline;
+    }else{
+      indexMap[key2] = existing.length + toAdd.length;
+      toAdd.push([item.name,item.phone,item.date,item.date,1,item.pipeline]);
+    }
+  }
+
+  if(existing.length){
+    s.getRange(2,1,existing.length,6).setValues(existing);
+  }
+
+  if(toAdd.length){
+    s.getRange(s.getLastRow()+1,1,toAdd.length,6).setValues(toAdd);
+  }
+
   _archivePending=[];
+  _ic('archive');
 }
 
 function getArchive(){
   var cached=_gc('archive'); if(cached) return cached;
+
   var res=readAll(SHEET_NAMES.ARCHIVE), result=[];
   for(var i=0;i<res.rows.length;i++){
-    var r=res.rows[i]; if(!r[0]) continue;
-    result.push({rowIndex:i+2, name:String(r[0]||''), phone:String(r[1]||''),
-      firstVisit:toD(r[2]), lastVisit:toD(r[3]), count:parseInt(r[4])||0, pipeline:String(r[5]||'')});
+    var r=res.rows[i];
+    if(!r[0]) continue;
+    result.push({
+      rowIndex:i+2,
+      name:String(r[0]||''),
+      phone:String(r[1]||''),
+      firstVisit:toD(r[2]),
+      lastVisit:toD(r[3]),
+      count:parseInt(r[4])||0,
+      pipeline:String(r[5]||'')
+    });
   }
+
   result.sort(function(a,b){ return b.count-a.count; });
-  _sc('archive',result); return result;
+  _sc('archive',result);
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1261,136 +1835,279 @@ function getArchive(){
 
 function getTamkeenStudents(filter){
   var ck='tk_'+(filter||'all');
-  var cached=_gc(ck); if(cached) return asArray(cached);
-  // If Tamkeen sheet is missing, don't break initial app load.
-  // Return empty list so UI can render "لا توجد بيانات".
-  var tkSheet;
-  try{ tkSheet=sheet(SHEET_NAMES.TAMKEEN); }catch(e){ tkSheet=null; }
-  if(!tkSheet){
-    _sc(ck,[]);
-    return [];
-  }
-  var res=readAll(tkSheet.getName());
+  var cached=_gc(ck); if(cached) return cached;
+
+  var res=readAllPadded(SHEET_NAMES.TAMKEEN, TC);
+
   var today=fmtD(new Date()), students=[], baseRows={};
+
   for(var i=0;i<res.rows.length;i++){
-    var row=res.rows[i]; while(row.length<TC) row.push('');
-    var name=String(row[T.NAME-1]||'').trim(); if(!name) continue;
-    var date=toD(row[T.DATE-1]); if(date) continue;
+    var row=res.rows[i];
+    while(row.length<TC) row.push('');
+
+    var name=String(row[T.NAME-1]||'').trim();
+    if(!name) continue;
+
+    var date=toD(row[T.DATE-1]);
+    if(date) continue;
+
     var g=String(row[T.GROUP-1]||'').trim();
     if(filter&&filter!=='all'&&g!==String(filter)) continue;
-    var s={rowIndex:i+2, group:g, name:name, phone:String(row[T.PHONE-1]||'').trim(),
-      email:String(row[T.EMAIL-1]||'').trim(), notes:String(row[T.NOTES-1]||'').trim(),
-      attendanceRowIndex:null, date:'', todayDate:'',
-      timeIn:'', timeOut:'', duration:'', durationH:0, cost:'', freezeTime:''};
-    baseRows[name]=s; students.push(s);
+
+    var s={
+      rowIndex:i+2,
+      group:g,
+      name:name,
+      phone:String(row[T.PHONE-1]||'').trim(),
+      email:String(row[T.EMAIL-1]||'').trim(),
+      notes:String(row[T.NOTES-1]||'').trim(),
+      attendanceRowIndex:null,
+      date:'',
+      todayDate:'',
+      timeIn:'',
+      timeOut:'',
+      duration:'',
+      durationH:0,
+      cost:'',
+      freezeTime:'',
+      snack:0,
+      snackPaid:''
+    };
+
+    baseRows[name]=s;
+    students.push(s);
   }
+
   for(var j=0;j<res.rows.length;j++){
-    var row=res.rows[j]; while(row.length<TC) row.push('');
-    var date=toD(row[T.DATE-1]); if(!date||date!==today) continue;
-    var name=String(row[T.NAME-1]||'').trim();
-    var base=baseRows[name]; if(!base) continue;
-    base.attendanceRowIndex=j+2; base.todayDate=date;
-    base.timeIn=toT(row[T.IN-1]); base.timeOut=toT(row[T.OUT-1]);
-    base.duration=String(row[T.DUR-1]||'');
-    base.durationH=parseFloat(row[T.DUR_H-1])||0;
-    base.cost=String(row[T.COST-1]||'');
-    base.freezeTime=toT(row[T.FREEZE-1]);
+    var row2=res.rows[j];
+    while(row2.length<TC) row2.push('');
+
+    var date2=toD(row2[T.DATE-1]);
+    if(!date2||date2!==today) continue;
+
+    var name2=String(row2[T.NAME-1]||'').trim();
+    var base=baseRows[name2];
+    if(!base) continue;
+
+    base.attendanceRowIndex=j+2;
+    base.todayDate=date2;
+    base.timeIn=toT(row2[T.IN-1]);
+    base.timeOut=toT(row2[T.OUT-1]);
+    base.duration=String(row2[T.DUR-1]||'');
+    base.durationH=parseFloat(row2[T.DUR_H-1])||0;
+    base.cost=String(row2[T.COST-1]||'');
+    base.freezeTime=toT(row2[T.FREEZE-1]);
+    base.snack=parseFloat(row2[T.SNACK-1])||0;
+    base.snackPaid=String(row2[T.SNACK_PAID-1]||'').trim();
   }
-  _sc(ck,students); return students;
+
+  // ── قراءة آخر سناك غير مدفوع لكل طالب ──────────────────
+  for(var k2=res.rows.length-1;k2>=0;k2--){
+    var rowK=res.rows[k2];
+    while(rowK.length<TC) rowK.push('');
+    var dateK=toD(rowK[T.DATE-1]);
+    if(!dateK) continue; // صف أساسي مش حضور
+    var snkK=parseFloat(rowK[T.SNACK-1])||0;
+    var snkPaidK=String(rowK[T.SNACK_PAID-1]||'').trim();
+    if(snkK<=0||snkPaidK==='نعم') continue;
+    var nameK=String(rowK[T.NAME-1]||'').trim();
+    var baseK=baseRows[nameK];
+    if(!baseK) continue;
+    // فقط إذا ما في سناك محدّد من حضور اليوم
+    if(!baseK.snack){
+      baseK.snack=snkK;
+      baseK.snackPaid=snkPaidK;
+      baseK.attendanceRowIndex=baseK.attendanceRowIndex||(k2+2);
+    }
+  }
+
+  _sc(ck,students);
+  return students;
 }
 
 function tamkeenCheckinSheet(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.TAMKEEN), t=now(), src=parseInt(data.rowIndex);
   var sd=s.getRange(src,1,1,4).getValues()[0];
   var lr=s.getLastRow();
+
   if(lr>1){
-    var rows=s.getRange(2,1,lr-1,TC).getValues();
+    var actualCols=Math.min(TC, s.getLastColumn());
+    var rows=s.getRange(2,1,lr-1,actualCols).getValues();
     var nm=String(sd[T.NAME-1]||'').trim();
+
     for(var i=0;i<rows.length;i++){
       while(rows[i].length<TC) rows[i].push('');
       if(String(rows[i][T.NAME-1]||'').trim()===nm&&toD(rows[i][T.DATE-1])===t.date&&!toT(rows[i][T.OUT-1]))
         return{success:false, error:nm+' لا يزال داخلاً اليوم'};
     }
   }
+
   var nr=s.getLastRow()+1;
   var newRow=new Array(TC).fill('');
   newRow[T.GROUP-1]=sd[0]; newRow[T.NAME-1]=sd[1]; newRow[T.PHONE-1]=sd[2]; newRow[T.EMAIL-1]=sd[3];
   newRow[T.DATE-1]=t.date; newRow[T.IN-1]=t.time;
-  writeRow(s,nr,newRow); invT();
+
+  writeRow(s,nr,newRow);
+  invT();
+
   return{success:true, timeIn:t.time, newRowIndex:nr};
 }
 
 function tamkeenCheckoutSheet(data){
   var ri=parseInt(data.attendanceRowIndex||data.rowIndex);
   if(!ri) return{success:false, error:'attendanceRowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.TAMKEEN), t=now();
-  var row=s.getRange(ri,1,1,TC).getValues()[0]; while(row.length<TC) row.push('');
+  var row=s.getRange(ri,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+
   if(!row[T.NAME-1]) return{success:false, error:'صف غير موجود'};
+
   var freeze=toT(row[T.FREEZE-1]);
-  var timeIn=toT(row[T.IN-1]); if(!timeIn) return{success:false, error:'وقت الدخول غير موجود'};
+  var timeIn=toT(row[T.IN-1]);
+  if(!timeIn) return{success:false, error:'وقت الدخول غير موجود'};
+
   var exitT=freeze||t.time;
   var dur=durBetween(timeIn,exitT);
   var cost=parseFloat((dur.decimal*HOURLY_RATE).toFixed(2));
+
   row[T.OUT-1]=exitT; row[T.DUR-1]=dur.label; row[T.DUR_H-1]=dur.decimal;
   row[T.COST-1]=cost; row[T.FREEZE-1]='';
-  writeRow(s,ri,row); invT();
+
+  writeRow(s,ri,row);
+  invT();
+
   return{success:true, timeOut:exitT, duration:dur.label, durationH:dur.decimal, cost:cost};
 }
 
 function updateTamkeenAttendance(data){
   if(!data.attendanceRowIndex) return{success:false, error:'attendanceRowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.TAMKEEN), ri=parseInt(data.attendanceRowIndex);
-  var row=s.getRange(ri,1,1,TC).getValues()[0]; while(row.length<TC) row.push('');
+  var row=s.getRange(ri,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+
   if(data.timeIn)  row[T.IN-1]=data.timeIn;
   if(data.timeOut) row[T.OUT-1]=data.timeOut;
+
   var ti=toT(row[T.IN-1]), to=toT(row[T.OUT-1]);
-  if(ti&&to){ var d=durBetween(ti,to); row[T.DUR-1]=d.label; row[T.DUR_H-1]=d.decimal; row[T.COST-1]=parseFloat((d.decimal*HOURLY_RATE).toFixed(2)); }
-  writeRow(s,ri,row); invT();
+  if(ti&&to){
+    var d=durBetween(ti,to);
+    row[T.DUR-1]=d.label;
+    row[T.DUR_H-1]=d.decimal;
+    row[T.COST-1]=parseFloat((d.decimal*HOURLY_RATE).toFixed(2));
+  }
+
+  writeRow(s,ri,row);
+  invT();
+
   return{success:true, duration:row[T.DUR-1]||'', durationH:row[T.DUR_H-1]||0, cost:row[T.COST-1]||0};
 }
 
 function updateTamkeen(data){
   if(!data.rowIndex) return{success:false, error:'rowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.TAMKEEN), ri=parseInt(data.rowIndex);
-  var row=s.getRange(ri,1,1,TC).getValues()[0]; while(row.length<TC) row.push('');
+  var row=s.getRange(ri,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+
   if(data.group!==undefined) row[T.GROUP-1]=data.group;
   if(data.name!==undefined)  row[T.NAME-1]=data.name;
   if(data.phone!==undefined) row[T.PHONE-1]=data.phone;
   if(data.email!==undefined) row[T.EMAIL-1]=data.email;
   if(data.notes!==undefined) row[T.NOTES-1]=data.notes;
-  writeRow(s,ri,row); invT(); return{success:true};
+
+  writeRow(s,ri,row);
+  invT();
+  return{success:true};
 }
 
 function freezeTamkeenTime(data){
   var attIdx=parseInt(data.attendanceRowIndex);
   if(!attIdx) return{success:false, error:'attendanceRowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.TAMKEEN);
-  var row=s.getRange(attIdx,1,1,TC).getValues()[0]; while(row.length<TC) row.push('');
+  var row=s.getRange(attIdx,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+
   if(!row[T.NAME-1])  return{success:false, error:'صف غير موجود'};
   if(row[T.OUT-1])    return{success:false, error:'الطالب خرج بالفعل'};
   if(row[T.FREEZE-1]) return{success:false, error:'الوقت مجمّد بالفعل'};
+
   var t=now();
   var dur=durBetween(toT(row[T.IN-1]),t.time);
   row[T.FREEZE-1]=t.time;
-  writeRow(s,attIdx,row); invT();
+
+  writeRow(s,attIdx,row);
+  invT();
+
   return{success:true, freezeTime:t.time, durationSoFar:dur.label};
 }
 
 function unfreezeTamkeenTime(data){
   var attIdx=parseInt(data.attendanceRowIndex);
   if(!attIdx) return{success:false, error:'attendanceRowIndex مطلوب'};
+
   var s=sheet(SHEET_NAMES.TAMKEEN);
-  var row=s.getRange(attIdx,1,1,TC).getValues()[0]; while(row.length<TC) row.push('');
+  var row=s.getRange(attIdx,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+
   if(!row[T.NAME-1]) return{success:false, error:'صف غير موجود'};
   var freeze=toT(row[T.FREEZE-1]);
   if(!freeze) return{success:false, error:'الوقت غير مجمّد'};
+
   var durBefore=durBetween(toT(row[T.IN-1]),freeze);
   var newEntry=new Date(Date.now()-Math.round(durBefore.decimal*3600000));
-  row[T.IN-1]=fmtT(newEntry); row[T.FREEZE-1]='';
-  writeRow(s,attIdx,row); invT();
+  row[T.IN-1]=fmtT(newEntry);
+  row[T.FREEZE-1]='';
+
+  writeRow(s,attIdx,row);
+  invT();
+
   return{success:true, newEntryTime:fmtT(newEntry)};
 }
+
+function addSnackToTamkeen(data){
+  if(!data.attendanceRowIndex) return{success:false,error:'attendanceRowIndex مطلوب'};
+  var s=sheet(SHEET_NAMES.TAMKEEN);
+  var ri=parseInt(data.attendanceRowIndex);
+  var row=s.getRange(ri,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+  if(!row[T.NAME-1]) return{success:false,error:'صف غير موجود'};
+
+  var adding=parseFloat(data.amount)||0;
+  if(adding<=0) return{success:false,error:'المبلغ يجب أن يكون أكبر من صفر'};
+
+  var currentSnack=parseFloat(row[T.SNACK-1])||0;
+  var newSnack=currentSnack+adding;
+  row[T.SNACK-1]=newSnack;
+  row[T.SNACK_PAID-1]='لا'; // غير مدفوع افتراضياً
+
+  var noteText=data.note?('سناك: '+data.note+' ₪'+adding):('سناك: ₪'+adding);
+  var existingNotes=String(row[T.NOTES-1]||'').trim();
+  row[T.NOTES-1]=existingNotes?existingNotes+' | '+noteText:noteText;
+
+  writeRow(s,ri,row);
+  invT();
+  return{success:true,snack:newSnack,note:noteText};
+}
+
+function payTamkeenSnack(data){
+  if(!data.attendanceRowIndex) return{success:false,error:'attendanceRowIndex مطلوب'};
+  var s=sheet(SHEET_NAMES.TAMKEEN);
+  var ri=parseInt(data.attendanceRowIndex);
+  var row=s.getRange(ri,1,1,TC).getValues()[0];
+  while(row.length<TC) row.push('');
+  if(!row[T.NAME-1]) return{success:false,error:'صف غير موجود'};
+  row[T.SNACK_PAID-1]='نعم';
+  writeRow(s,ri,row);
+  invT();
+  return{success:true};
+}
+
+
 
 // ═══════════════════════════════════════════════════════════════
 // 13. WEB APP
@@ -1413,44 +2130,136 @@ function doGet(){
     .addMetaTag('viewport','width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
-function include(f){ return HtmlService.createHtmlOutputFromFile(f).getContent(); }
 
-function getInitialData(){
-  // تأكد أن شيت الحجوزات المسبقة موجود
-  futureSheet();
-  var todayV=[], allSubs=[], allTk=[], dash={};
-  try{ todayV=getVisitors('today'); }catch(e){ Logger.log('getInitialData:getVisitors '+e); }
-  try{ allSubs=getSubscriptions('all'); }catch(e){ Logger.log('getInitialData:getSubscriptions '+e); }
-  try{ allTk=getTamkeenStudents('all'); }catch(e){ Logger.log('getInitialData:getTamkeenStudents '+e); }
-  try{ dash=getDashboardData('today'); }catch(e){ Logger.log('getInitialData:getDashboardData '+e); dash={period:'today'}; }
-  return{
-    visitors     : asArray(todayV),
-    subscriptions: asArray(allSubs),
-    tamkeen      : asArray(allTk),
-    opts         : OPTIONS,
-    today        : fmtD(new Date()),
-    todayDay     : dayName(new Date()),
-    dashboard    : dash
+function include(f){
+  return HtmlService.createHtmlOutputFromFile(f).getContent();
+}
+
+
+
+
+function getInitialData() {
+  var todayStr = fmtD(new Date());
+  var cachedInit = _gc(INIT_CACHE_KEY);
+  if(cachedInit && cachedInit.today === todayStr) return cachedInit;
+
+  var todayVisitors = getVisitors('today');
+  var allSubs = getSubscriptions('all');
+  var allTk   = getTamkeenStudents('all');
+  var dash = _gc('dash_today');
+  if(!dash){
+    var allV = getVisitors('all');
+    var allRooms = getFilteredBookings('all');
+    dash = getDashboardDataFromPrefetched({
+      visitors      : allV,
+      subscriptions : allSubs,
+      tamkeen       : allTk,
+      rooms         : allRooms,
+      period        : 'today'
+    });
+  }
+
+  var payload = {
+    visitors      : todayVisitors,
+    subscriptions : allSubs,
+    tamkeen       : allTk,
+    opts          : OPTIONS,
+    today         : todayStr,
+    todayDay      : dayName(new Date()),
+    dashboard     : dash
   };
+  _sc(INIT_CACHE_KEY, payload);
+  return payload;
+}
+
+function getBootData() {
+  var todayStr = fmtD(new Date());
+  var cachedBoot = _gc(BOOT_CACHE_KEY);
+  if(cachedBoot && cachedBoot.today === todayStr) return cachedBoot;
+
+  var dash = _gc('dash_today');
+  if(!dash){
+    var allV = getVisitors('all');
+    var allSubs = getSubscriptions('all');
+    var allTk = getTamkeenStudents('all');
+    var allRooms = getFilteredBookings('all');
+    dash = getDashboardDataFromPrefetched({
+      visitors      : allV,
+      subscriptions : allSubs,
+      tamkeen       : allTk,
+      rooms         : allRooms,
+      period        : 'today'
+    });
+  }
+
+  var payload = {
+    visitors  : getVisitors('today'),
+    opts      : OPTIONS,
+    today     : todayStr,
+    todayDay  : dayName(new Date()),
+    dashboard : dash
+  };
+  _sc(BOOT_CACHE_KEY, payload);
+  return payload;
+}
+
+function getSecondaryData() {
+  return {
+    subscriptions : getSubscriptions('all'),
+    tamkeen       : getTamkeenStudents('all')
+  };
+}
+
+// Delete visitors 
+
+function deleteVisitor(data){
+  if(!data.rowIndex) return{success:false,error:'rowIndex مطلوب'};
+  var s=sheet(SHEET_NAMES.VISITORS);
+  var ri=parseInt(data.rowIndex);
+  if(ri<2||ri>s.getLastRow()) return{success:false,error:'الصف غير موجود'};
+  s.deleteRow(ri); invV();
+  return{success:true};
 }
 
 // ═══════════════════════════════════════════════════════════════
 // 14. processRequest — ROUTER
 // ═══════════════════════════════════════════════════════════════
+function invalidateAllCaches() {
+  var keys = [
+    'vis_all', 'vis_today', 'vis_active', 'vis_hd',
+    'rooms_all', 'rooms_today', 'rooms_week', 'rooms_month', 'rooms_future',
+    'subs_all', 'subs_active', 'subs_expired', 'subs_weekly', 'subs_monthly',
+    'tk_all', 'future_all',
+    'dash_today', 'dash_week', 'dash_month',
+    INIT_CACHE_KEY, BOOT_CACHE_KEY, VIS_NAME_INDEX_KEY
+  ];
+  for (var i = 0; i < keys.length; i++) {
+    try { _ic(keys[i]); } catch(e) {}
+  }
+}
+
+//  — دالة خفيفة للتحديث بعد العمليات
+function getLightRefresh() {
+  return {
+    visitors      : getVisitors('today'),
+    subscriptions : getSubscriptions('all'),
+    tamkeen       : getTamkeenStudents('all'),
+    dashboard     : getDashboardData('today'),
+    today         : fmtD(new Date())
+  };
+}
 
 function processRequest(action,data){
-  _archivePending=[];
-  try{
-    data=data||{};
-    var result;
-    switch(action){
-      // ── Social (compat: in case this router is the active one) ──
-      case 'social_checkin'         : result=_socialCheckin(data);                            break;
-      case 'social_addFuture'       : result=addFutureBooking(data);                          break;
-      case 'social_addBooking'      : result=_socialAddBooking(data);                         break;
-      case 'social_getHallBookings' : result=_socialGetHallBookings(data);                    break;
-      case 'social_getDashboard'    : result=_socialGetDashboard(data);                       break;
+  _archivePending = [];
+ // _resetSheetCaches();
 
+//  invalidateAllCaches();
+
+  try{
+    data = data || {};
+    var result;
+
+    switch(action){
       // ── Visitors ──────────────────────────────────────────────
       case 'getVisitors'            : result=getVisitors(data.filter);                        break;
       case 'checkin'                : result=checkinVisitor(data);                            break;
@@ -1460,8 +2269,12 @@ function processRequest(action,data){
       case 'freezeTime'             : result=freezeVisitorTime(data);                         break;
       case 'unfreezeTime'           : result=unfreezeVisitorTime(data);                       break;
       case 'updatePayment'          : result=updatePayment(data);                             break;
+      case 'deleteVisitor'          : result = deleteVisitor(data);                           break;
+      case 'addSnackToVisitor'      : result = addSnackToVisitor(data);                       break;
+      case 'addSnackToSubscription' : result = addSnackToSubscription(data);                  break;
 
-      // ── Future Bookings (حجوزات مسبقة) ────────────────────────
+
+      // ── Future Bookings ───────────────────────────────────────
       case 'addFutureBooking'       : result=addFutureBooking(data);                          break;
       case 'getFutureBookings'      : result=getFutureBookings();                             break;
       case 'checkinFromFuture'      : result=checkinFromFuture(data);                         break;
@@ -1493,6 +2306,8 @@ function processRequest(action,data){
       case 'updateTamkeenAttendance': result=updateTamkeenAttendance(data);                   break;
       case 'freezeTamkeenTime'      : result=freezeTamkeenTime(data);                         break;
       case 'unfreezeTamkeenTime'    : result=unfreezeTamkeenTime(data);                       break;
+      case 'addSnackToTamkeen'      : result = addSnackToTamkeen(data);                       break;
+      case 'payTamkeenSnack'        : result = payTamkeenSnack(data);                         break;
 
       // ── Dashboard & Init ──────────────────────────────────────
       case 'getDashboard'           : result=getDashboardData(data.period||'today');          break;
@@ -1501,12 +2316,14 @@ function processRequest(action,data){
       case 'getArchive'             : result=getArchive();                                    break;
 
       default:
-        result={success:false, error:'إجراء غير معروف: '+action};
+        result = {success:false, error:'إجراء غير معروف: ' + action};
     }
+
     _flushArchive();
     return result;
+
   }catch(e){
-    Logger.log('processRequest ['+action+']: '+e.toString()+'\n'+(e.stack||''));
-    return{success:false, error:e.toString()};
+    Logger.log('processRequest [' + action + ']: ' + e.toString() + '\n' + (e.stack || ''));
+    return {success:false, error:e.toString()};
   }
 }

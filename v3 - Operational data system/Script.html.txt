@@ -1,4 +1,4 @@
-﻿<script>
+<script>
 // ================================================================
 // STATE
 // ================================================================
@@ -47,14 +47,16 @@ function boot() {
       }catch(err){
         var m=(err&&err.message)?err.message:String(err||'');
         showToast('تعذّر تجهيز الواجهة: '+m,'error');
-        var w=document.getElementById('weekly-tbody'); if(w) w.innerHTML='<tr><td colspan="12" class="empty-state">لا توجد اشتراكات</td></tr>';
-        var mo=document.getElementById('monthly-tbody'); if(mo) mo.innerHTML='<tr><td colspan="12" class="empty-state">لا توجد اشتراكات</td></tr>';
-        var t=document.getElementById('tamkeen-tbody'); if(t) t.innerHTML='<tr><td colspan="9" class="empty-state">لا توجد بيانات</td></tr>';
+        var w=document.getElementById('weekly-tbody'); if(w) w.innerHTML='<td colspan="12" class="empty-state">لا توجد اشتراكات</td>';
+        var mo=document.getElementById('monthly-tbody'); if(mo) mo.innerHTML='<td colspan="12" class="empty-state">لا توجد اشتراكات</td>';
+        var t=document.getElementById('tamkeen-tbody'); if(t) t.innerHTML='<td colspan="9" class="empty-state">لا توجد بيانات</td>';
       }
     })
     .withFailureHandler(function(e){ showToast('فشل التحميل: '+e.message,'error'); })
     .getInitialData();
 }
+
+
 
 // ================================================================
 // NAV
@@ -118,15 +120,22 @@ function nowTime(){var n=new Date();return pad2(n.getHours())+':'+pad2(n.getMinu
 function nowDate(){var n=new Date();return pad2(n.getDate())+'-'+pad2(n.getMonth()+1)+'-'+n.getFullYear();}
 function toYMD(dmy){if(!dmy)return'';var p=dmy.split('-');return p[2]+'-'+p[1]+'-'+p[0];}
 function toDMY(ymd){if(!ymd)return'';var p=ymd.split('-');return p[2]+'-'+p[1]+'-'+p[0];}
+
 function normSubType(v){
   var s=String(v||'').replace(/[\u200e\u200f\u061c]/g,'').trim();
+  if(s==='اسبوعي') return 'أسبوعي';
+  if(s==='شهرى')   return 'شهري';
+  return s;
+}
 
-  if(!expDMY)return null;
+function daysLeft(expDMY){
+  if(!expDMY) return null;
   var p=expDMY.split('-');
   var exp=new Date(+p[2],+p[1]-1,+p[0]);
-  var today=new Date();today.setHours(0,0,0,0);
+  var today=new Date(); today.setHours(0,0,0,0);
   return Math.ceil((exp-today)/86400000);
 }
+
 function calcElapsed(date,time){
   try{
     var dp=date.split('-'),tp=time.split(':');
@@ -185,6 +194,7 @@ function renderDashboard(){
   setText('dk-rev-subs','أسبوعي ₪'+(d.weeklyRevenue||0)+' | شهري ₪'+(d.monthlyRevenue||0));
   setText('dk-rev-t','تمكين ₪'+(d.tamkeenRevenue||0));
   setText('dk-rev-r','قاعات ₪'+(d.hallRevenue||0));
+  setText('dk-rev-snack','سناك ₪'+(d.snackRevenue||0));
   setText('dk-collected','₪'+(d.collected||0));
   setText('dk-pending',(d.pending||0)>0?'-₪'+(d.pending||0).toFixed(2):'₪0');
   var pendEl=document.getElementById('dk-pending-breakdown');
@@ -195,7 +205,7 @@ function renderDashboard(){
   setText('dk-total-op-hours',(d.totalHours||0)+'س');
   var visits=d.todayVisits||[];
   var tb=document.getElementById('dash-visits-tbody');
-  if(!visits.length){tb.innerHTML='<tr><td colspan="8" class="empty-state">لا توجد زيارات</td></tr>';return;}
+  if(!visits.length){tb.innerHTML='<td colspan="8" class="empty-state">لا توجد زيارات</td>';return;}
   tb.innerHTML=visits.slice(0,30).map(function(v){
     var isT=(v.pipeline==='برنامج تمكين إنسان');
     var badge=!v.exitTime?'<span class="badge badge-active">داخل</span>':'<span class="badge badge-done">خرج</span>';
@@ -206,7 +216,7 @@ function renderDashboard(){
   var unpaid=d.unpaidList||[];
   var utb=document.getElementById('dash-unpaid-tbody');
   if(!utb) return;
-  if(!unpaid.length){utb.innerHTML='<tr><td colspan="9" class="empty-state">لا يوجد مبالغ غير محصَّلة</td></tr>';}
+  if(!unpaid.length){utb.innerHTML='<td colspan="9" class="empty-state">لا يوجد مبالغ غير محصَّلة</td>';}
   else{
     utb.innerHTML=unpaid.map(function(v){
       var cat=v.type==='hall'?'<span class="badge badge-room">قاعة</span>':(v.type==='sub'?'<span class="badge badge-warning">اشتراك</span>':'<span class="badge badge-done">زيارة</span>');
@@ -280,20 +290,8 @@ function initInlinePaymentModal(){
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-inline-payment');
         showToast('تم تحصيل ₪'+adding.toFixed(2)+' ✓','success');
-        var row=document.querySelector('#dash-unpaid-tbody tr[data-type="'+type+'"][data-row="'+rowIndex+'"]');
-        if(row){
-          if(newRem<=0){
-            row.remove();
-            var tb=document.getElementById('dash-unpaid-tbody');
-            if(tb&&!tb.querySelector('tr'))tb.innerHTML='<tr><td colspan="9" class="empty-state">لا يوجد مبالغ غير محصَّلة</td></tr>';
-          } else {
-            var pc=row.querySelector('.unpaid-paid-cell'),rc=row.querySelector('.unpaid-rem-cell'),pb=row.querySelector('.unpaid-pay-btn');
-            if(pc)pc.textContent='₪'+newPaid.toFixed(2)+' ('+Math.round(newPaid/total*100)+'%)';
-            if(rc)rc.textContent='₪'+newRem.toFixed(2);
-            if(pb)pb.dataset.paid=newPaid;
-          }
-        }
-        setTimeout(function(){loadDashboard(APP.dashPeriod);},700);
+        // تحديث كامل
+        silentRefresh();
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد التحصيل';showToast('خطأ: '+e.message,'error');})
       .processRequest('updatePayment',{type:type,rowIndex:rowIndex,amountPaid:newPaid,payType:payType,account:account});
@@ -310,12 +308,19 @@ function loadDashboard(period){
 function silentRefresh(){
   google.script.run
     .withSuccessHandler(function(d){
-      APP.visitors=d.visitors||[];APP.subscriptions=d.subscriptions||[];
-      APP.tamkeen=d.tamkeen||[];APP.dashData=d.dashboard||{};
-      renderDashboard();renderVisitors();renderWeeklySubs();renderMonthlySubs();
-      renderTamkeen();renderVKPIs();
-      var hallsActive=document.getElementById('pg-rooms')&&document.getElementById('pg-rooms').classList.contains('active');
-      if(hallsActive) loadAndRenderHalls();
+      APP.visitors = d.visitors || [];
+      APP.subscriptions = d.subscriptions || [];
+      APP.tamkeen = d.tamkeen || [];
+      APP.dashData = d.dashboard || {};
+      APP.today         = d.today || APP.today;
+
+      renderDashboard();
+      renderVisitors();
+      renderWeeklySubs();
+      renderMonthlySubs();
+      renderTamkeen();
+      renderVKPIs();
+      if(document.getElementById('pg-rooms').classList.contains('active')) loadAndRenderHalls();
       loadFutureBookings();
     })
     .withFailureHandler(function(){})
@@ -369,14 +374,18 @@ function renderVisitors(){
     return true;
   });
   var tb=document.getElementById('visitors-tbody');
-  if(!list.length){tb.innerHTML='<tr><td colspan="11" class="empty-state">لا توجد نتائج</td></tr>';return;}
+  if(!list.length){tb.innerHTML='<td colspan="11" class="empty-state">لا توجد نتائج</td>';return;}
   tb.innerHTML=list.map(function(v){
     var isA=!v.exitTime;
     var sb=isA?'<span class="badge badge-active">داخل</span>':'<span class="badge badge-done">خرج</span>';
     var pb=v.paid==='نعم'?'<span class="badge badge-paid">نعم</span>':'<span class="badge badge-unpaid">لا</span>';
-    var acts='<div class="td-actions"><button class="btn btn-secondary btn-sm" onclick="openEditVisitor('+v.rowIndex+')">تعديل</button>';
+    var acts='<div class="td-actions"><button class="btn btn-secondary btn-sm" onclick="openEditVisitor('+v.rowIndex+')">تعديل</button>'
+       +(isA ? '<button class="btn btn-secondary btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="confirmDeleteVisitor('+v.rowIndex+',\''+v.name+'\')">حذف ✕</button>' : '');
+
     if(isA){
       acts+='<button class="btn btn-primary btn-sm" onclick="openCheckout('+v.rowIndex+')">خروج</button>';
+      acts+='<button class="btn btn-secondary btn-sm" onclick="openSnack('+v.rowIndex+')" title="إضافة سناك">☕ سناك</button>';
+
       if(v.freezeTime){
         acts+='<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreeze('+v.rowIndex+')">▶ استئناف</button>';
       } else {
@@ -385,7 +394,12 @@ function renderVisitors(){
     }
     acts+='</div>';
     var amtRem=parseFloat(v.amountRemaining)||0;
+    var snackAmt=parseFloat(v.snack)||0;
+    var snackBadge=snackAmt>0?('<span class="badge" style="background:#fef3c7;color:#d97706;font-size:.65rem;">☕₪'+snackAmt+'</span> '):'';
     var payDisplay=amtRem>0?('<span style="color:var(--warning);">₪'+amtRem+' متبقي</span>'):pb;
+    payDisplay=snackBadge+payDisplay;
+
+
     var frozenBadge=v.freezeTime?'<span class="badge badge-warning" title="مجمّد عند '+v.freezeTime.slice(0,5)+'">⏸</span>':'';
     return '<tr class="'+(isA?'row-active':'')+(v.freezeTime?' row-warn':'')+'"><td>'+v.name+'</td><td>'+v.phone+'</td><td>'+(v.entryDate||v.date||'')+'</td><td>'+(v.entryTime||'').slice(0,5)+frozenBadge+'</td><td>'+(v.exitTime?v.exitTime.slice(0,5):'—')+'</td><td>'+(v.duration||'—')+'</td><td>'+v.subType+'</td><td>'+(v.cost?'₪'+v.cost:'—')+'</td><td>'+payDisplay+'</td><td>'+sb+'</td><td>'+acts+'</td></tr>';
   }).join('');
@@ -404,7 +418,7 @@ function renderSubTable(type,filterVal,search,tbodyId){
     return true;
   });
   var tb=document.getElementById(tbodyId);
-  if(!list.length){tb.innerHTML='<tr><td colspan="13" class="empty-state">لا توجد اشتراكات</td></tr>';return;}
+  if(!list.length){tb.innerHTML='<td colspan="13" class="empty-state">لا توجد اشتراكات</td>';return;}
   tb.innerHTML=list.map(function(s){
     var dl=daysLeft(s.expiryDate);
     var sb=s.isExpired?'<span class="badge badge-expired">منتهي</span>':(dl!==null&&dl<=3?'<span class="badge badge-warning">'+dl+' أيام</span>':'<span class="badge badge-active">نشط</span>');
@@ -413,12 +427,15 @@ function renderSubTable(type,filterVal,search,tbodyId){
     var todayIn=activeV?activeV.entryTime.slice(0,5):'—';
     var ciBtn,coBtn='';
     if(activeV){
-      ciBtn='';
-      var freezeBtn=activeV.freezeTime
-        ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreeze('+(activeV.rowIndex||activeV.ri)+')">▶ استئناف</button>'
-        :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreeze('+(activeV.rowIndex||activeV.ri)+')" title="⏸ تجميد">⏸</button>';
-      coBtn='<button class="btn btn-danger btn-sm sub-co-btn" data-vis="'+(activeV.rowIndex||activeV.ri)+'" data-sub="'+(s.rowIndex||s.ri)+'">خروج</button>'+freezeBtn;
-    } else if(!s.isExpired){
+  ciBtn='';
+  var freezeBtn=activeV.freezeTime
+    ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreeze('+(activeV.rowIndex||activeV.ri)+')">▶ استئناف</button>'
+    :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreeze('+(activeV.rowIndex||activeV.ri)+')" title="⏸ تجميد">⏸</button>';
+  coBtn='<button class="btn btn-danger btn-sm sub-co-btn" data-vis="'+(activeV.rowIndex||activeV.ri)+'" data-sub="'+(s.rowIndex||s.ri)+'">خروج</button>'
+       +'<button class="btn btn-secondary btn-sm" onclick="openSnack('+(activeV.rowIndex||activeV.ri)+','+(s.rowIndex||s.ri)+')" title="إضافة سناك">☕ سناك</button>'
+       +freezeBtn;
+}
+     else if(!s.isExpired){
       ciBtn='<button class="btn btn-primary btn-sm sub-ci-btn" data-row="'+s.rowIndex+'">دخول</button>';
     } else {
       ciBtn='<button class="btn btn-secondary btn-sm sub-renew-btn" style="color:var(--danger);border-color:var(--danger);" data-row="'+s.rowIndex+'" title="انتهت الصلاحية">تجديد</button>';
@@ -452,9 +469,8 @@ function directSubCheckout(visRow,subRow,btn){
     .withSuccessHandler(function(res){
       if(btn){btn.disabled=false;}
       if(!res.success){showToast(res.error||'فشل الخروج','error');if(btn)btn.textContent='خروج';return;}
-      var v=findVisitor(visRow);
-      if(v){v.exitTime=res.exitTime;v.duration=res.duration;v.durationH=res.durationH;}
-      renderWeeklySubs();renderMonthlySubs();renderVisitors();renderVKPIs();
+      // تحديث كامل
+      silentRefresh();
       showToast('تم تسجيل الخروج ✓','success');
     })
     .withFailureHandler(function(e){if(btn){btn.disabled=false;btn.textContent='خروج';}showToast('خطأ: '+e.message,'error');})
@@ -492,7 +508,7 @@ function doFreeze(rowIndex){
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
-      v.freezeTime=res.freezeTime;renderVisitors();
+      silentRefresh();
       showToast('⏸ تم تجميد الوقت — '+res.durationSoFar,'success');
     })
     .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
@@ -503,7 +519,7 @@ function doUnfreeze(rowIndex){
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
-      v.freezeTime='';v.entryTime=res.newEntryTime;renderVisitors();
+      silentRefresh();
       showToast('▶ تم استئناف احتساب الوقت','success');
     })
     .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
@@ -517,7 +533,7 @@ function initCheckinModal(){
   document.getElementById('btn-open-checkin').addEventListener('click',function(){
     ['ci-name','ci-phone','ci-notes'].forEach(function(id){document.getElementById(id).value='';});
     document.getElementById('ci-banner').style.display='none';
-    setSel('ci-subtype','');setSel('ci-pipeline','');
+    setSel('ci-subtype','ساعات'); setSel('ci-pipeline','');
     if(APP.today){var dp=APP.today.split('-');document.getElementById('ci-date').value=dp[2]+'-'+dp[1]+'-'+dp[0];}
     var n=new Date();document.getElementById('ci-time').value=pad2(n.getHours())+':'+pad2(n.getMinutes());
     openModal('modal-checkin');document.getElementById('ci-name').focus();
@@ -539,53 +555,77 @@ function initCheckinModal(){
     var ciTimeVal=document.getElementById('ci-time').value||'';
     var ciDateDMY=ciDateVal?ciDateVal.split('-').reverse().join('-'):'';
     var data={name:document.getElementById('ci-name').value.trim(),phone:document.getElementById('ci-phone').value.trim(),subType:document.getElementById('ci-subtype').value,pipeline:document.getElementById('ci-pipeline').value,notes:document.getElementById('ci-notes').value.trim(),entryDate:ciDateDMY,entryTime:ciTimeVal};
-    if(!data.name||!data.phone||!data.subType||!data.pipeline){showToast('يرجى تعبئة الحقول المطلوبة','error');return;}
+    
+    
+   
+  if(!data.name){
+  showToast('الاسم مطلوب','error');
+  return;
+}
+if(!data.subType){
+  showToast('يرجى اختيار نوع الاشتراك','error');
+  return;
+}
+
+
     btn.disabled=true;btn.textContent='جاري...';
     google.script.run
       .withSuccessHandler(function(res){
         btn.disabled=false;btn.textContent='تسجيل الدخول';
         if(!res.success){showToast(res.error,'error');return;}
-        APP.visitors.unshift({rowIndex:res.rowIndex,ri:res.rowIndex,id:res.id,name:data.name,phone:data.phone,entryDate:res.entryDate,date:res.entryDate,entryTime:res.entryTime,exitTime:'',duration:'',durationH:0,subType:data.subType,pipeline:data.pipeline,firstVisit:res.isFirstVisit?'نعم':'لا',cost:'',paid:'لا',notes:data.notes||'',amountPaid:0,amountRemaining:0,freezeTime:''});
-        closeModal('modal-checkin');renderVisitors();
+        closeModal('modal-checkin');
+        silentRefresh();
         showToast('تم تسجيل دخول '+data.name,'success');
         if(res.isFirstVisit)showToast('زيارة أولى ⭐','success');
-        setTimeout(function(){loadDashboard(APP.dashPeriod);},1500);
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تسجيل الدخول';showToast('خطأ: '+e.message,'error');})
       .processRequest('checkin',data);
   });
 }
 
-// ================================================================
-// CHECKOUT MODAL
-// ================================================================
+
 function openCheckout(ri){
   var v=findVisitor(ri); if(!v) return;
-  APP.activeVisRow=ri;APP.coDate=v.entryDate||v.date;APP.coTime=v.entryTime||v.in;
+  APP.activeVisRow=ri; APP.coDate=v.entryDate||v.date; APP.coTime=v.entryTime||v.in;
   document.getElementById('co-name').textContent=v.name;
   document.getElementById('co-subtype').textContent=v.subType;
-  var rate=APP.opts.HOURLY_RATE||5;
-  var dp=(APP.coDate||'').split('-'),tp=(APP.coTime||'').split(':');
-  var elapsed=0;
-  if(dp.length===3&&tp.length>=2){
-    var entryMs=new Date(+dp[2],+dp[1]-1,+dp[0],+tp[0],+tp[1],+(tp[2]||0)).getTime();
-    elapsed=Math.max(0,(Date.now()-entryMs)/3600000);
+
+  // ── عرض السناك إذا موجود ──────────────────────────────────
+  var snackAmt = parseFloat(v.snack)||0;
+  var snackEl  = document.getElementById('co-snack-display');
+  if(snackEl){
+    if(snackAmt > 0){
+      snackEl.textContent = '☕ سناك: ₪' + snackAmt;
+      snackEl.style.display = '';
+    } else {
+      snackEl.style.display = 'none';
+    }
   }
-  if(v.freezeTime){
-    var ftp=v.freezeTime.split(':');
-    var freezeMs=new Date(+dp[2],+dp[1]-1,+dp[0],+ftp[0],+ftp[1],+(ftp[2]||0)).getTime();
-    elapsed=Math.max(0,(freezeMs-new Date(+dp[2],+dp[1]-1,+dp[0],+tp[0],+tp[1],+(tp[2]||0)).getTime())/3600000);
-  }
-  var autoCost=v.subType==='يومي'?20:parseFloat((elapsed*rate).toFixed(2));
-  var autoEl=document.getElementById('co-auto-cost');if(autoEl)autoEl.textContent='₪ '+autoCost;
-  var costEl=document.getElementById('co-cost');if(costEl)costEl.value=autoCost;
-  var apEl=document.getElementById('co-amount-paid');if(apEl)apEl.value='';
-  var remEl=document.getElementById('co-remaining');if(remEl)remEl.textContent='₪ '+autoCost;
+
+  var autoEl=document.getElementById('co-auto-cost');
+  if(autoEl) autoEl.textContent='';
+
+  var costEl=document.getElementById('co-cost');
+  if(costEl) costEl.value = snackAmt > 0 ? snackAmt : '';
+
+  var apEl=document.getElementById('co-amount-paid');
+  if(apEl) apEl.value='';
+
+  var remEl=document.getElementById('co-remaining');
+  if(remEl) remEl.textContent='—';
+
   document.getElementById('co-paid').checked=false;
-  setSel('co-paytype','');toggleAcct('co-paytype','co-account-group');
-  startCoTimer();openModal('modal-checkout');
-  if(apEl)setTimeout(function(){apEl.focus();},200);
+  setSel('co-paytype','');
+  toggleAcct('co-paytype','co-account-group');
+  startCoTimer();
+  openModal('modal-checkout');
+  if(apEl) setTimeout(function(){apEl.focus();},200);
 }
+
+
+
+
+
 function startCoTimer(){
   stopCoTimer();
   var el=document.getElementById('co-timer');
@@ -613,8 +653,10 @@ function initCheckoutModal(){
   document.getElementById('btn-co-submit').addEventListener('click',function(){
     var btn=this;
     var totalCost=parseFloat(document.getElementById('co-cost').value)||0;
-    var payType=document.getElementById('co-paytype').value;
-    if(!payType){showToast('يرجى اختيار طريقة الدفع','error');return;}
+    var payType=(document.getElementById('co-paytype')||{}).value||'';
+
+    //var payType=document.getElementById('co-paytype').value;
+    //if(!payType){showToast('يرجى اختيار طريقة الدفع','error');return;}
     var apEl=document.getElementById('co-amount-paid');
     var amtPaid=apEl?(parseFloat(apEl.value)||0):0;
     if(document.getElementById('co-paid').checked)amtPaid=totalCost;
@@ -624,12 +666,10 @@ function initCheckoutModal(){
       .withSuccessHandler(function(res){
         btn.disabled=false;btn.textContent='تأكيد الخروج';
         if(!res.success){showToast(res.error,'error');return;}
-        var v=findVisitor(APP.activeVisRow);
-        if(v){v.exitTime=res.exitTime;v.duration=res.duration;v.durationH=res.durationH;v.cost=String(totalCost);v.payType=data.payType;v.account=data.account;v.paid=res.paid||'لا';v.amountPaid=res.amountPaid||0;v.amountRemaining=res.amountRemaining||0;v.freezeTime='';}
-        stopCoTimer();closeModal('modal-checkout');renderVisitors();renderVKPIs();
+        stopCoTimer();closeModal('modal-checkout');
+        silentRefresh();
         showToast('تم تسجيل الخروج ✓','success');
         if((res.amountRemaining||0)>0)showToast('تنبيه: متبقي ₪'+res.amountRemaining.toFixed(2),'warn');
-        setTimeout(function(){loadDashboard(APP.dashPeriod);},1200);
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد الخروج';showToast('خطأ: '+e.message,'error');})
       .processRequest('checkout',data);
@@ -668,14 +708,33 @@ function initEditVisitorModal(){
       .withSuccessHandler(function(res){
         btn.disabled=false;btn.textContent='حفظ التعديلات';
         if(!res.success){showToast(res.error,'error');return;}
-        var v=findVisitor(APP.activeVisRow);
-        if(v){Object.assign(v,{name:data.name,phone:data.phone,subType:data.subType,pipeline:data.pipeline,cost:data.cost,payType:data.payType,account:data.account,paid:data.paid,notes:data.notes});if(data.entryTime)v.entryTime=data.entryTime;if(data.exitTime)v.exitTime=data.exitTime;}
-        closeModal('modal-edit-visitor');renderVisitors();showToast('تم الحفظ ✓','success');
+        closeModal('modal-edit-visitor');
+        silentRefresh();
+        showToast('تم الحفظ ✓','success');
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast('خطأ: '+e.message,'error');})
       .processRequest('updateVisitor',data);
   });
 }
+
+// confirm delete visitors 
+
+
+
+function confirmDeleteVisitor(rowIndex, name){
+  if(!confirm('حذف سجل '+name+'؟ لا يمكن التراجع.')) return;
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res.success){showToast(res.error,'error');return;}
+      showToast('تم الحذف ✓','success');
+      APP.visitors = APP.visitors.filter(function(v){return (v.rowIndex||v.ri)!==rowIndex;});
+      renderVisitors(); renderVKPIs();
+      setTimeout(function(){loadDashboard(APP.dashPeriod);},800);
+    })
+    .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
+    .processRequest('deleteVisitor',{rowIndex:rowIndex});
+}
+
 
 // ================================================================
 // ADD SUBSCRIPTION MODAL
@@ -719,8 +778,8 @@ function initAddSubModal(){
       .withSuccessHandler(function(res){
         btn.disabled=false;btn.textContent='حفظ الاشتراك';
         if(!res.success){showToast(res.error,'error');return;}
-        APP.subscriptions.unshift({rowIndex:res.rowIndex,subId:res.subId,name:data.name,phone:data.phone,pipeline:data.pipeline,subType:data.subType,startDate:toDMY(data.startDate),expiryDate:res.expiryDate,cost:data.cost,payType:data.payType,account:data.account,paid:data.paid?'نعم':'لا',notes:data.notes,visitsCount:0,lastVisit:'',visitIds:'',totalHours:0,isExpired:false});
-        closeModal('modal-add-sub');renderWeeklySubs();renderMonthlySubs();
+        closeModal('modal-add-sub');
+        silentRefresh();
         showToast('تم إضافة الاشتراك ✓','success');
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ الاشتراك';showToast('خطأ: '+e.message,'error');})
@@ -758,6 +817,7 @@ function openRenewSub(ri){
   setSel('rn-new-subtype',sub.subType);setSel('rn-new-pipeline',sub.pipeline||'');setSel('rn-new-paytype','');
   openModal('modal-renew-sub');
 }
+
 function initSubCheckinModal(){
   document.getElementById('btn-sci-confirm').addEventListener('click',function(){
     var btn=this;if(!APP.activeSubObj){showToast('خطأ','error');return;}
@@ -766,20 +826,36 @@ function initSubCheckinModal(){
     btn.disabled=true;btn.textContent='جاري...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='تسجيل الدخول';
-        if(!res.success){if(res.expired){closeModal('modal-sub-checkin');openRenewSub(sub.rowIndex);return;}showToast(res.error,'error');return;}
-        var s=findSub(sub.rowIndex);
-        if(s){s.visitsCount=res.visitsCount;s.lastVisit=res.entryDate;s.visitIds=s.visitIds?s.visitIds+','+res.visitorRowIndex:String(res.visitorRowIndex);}
-        APP.visitors.unshift({rowIndex:res.visitorRowIndex,ri:res.visitorRowIndex,name:sub.name,phone:sub.phone,entryDate:res.entryDate,date:res.entryDate,entryTime:res.entryTime,exitTime:'',duration:'',durationH:0,subType:sub.subType,pipeline:sub.pipeline||'',firstVisit:'لا',cost:'0',paid:'نعم',notes:'',amountPaid:0,amountRemaining:0,freezeTime:''});
-        var name=sub.name;APP.activeSubObj=null;
-        closeModal('modal-sub-checkin');renderWeeklySubs();renderMonthlySubs();renderVisitors();renderVKPIs();
-        showToast('تم تسجيل دخول '+name+' ✓','success');
-        setTimeout(function(){loadDashboard(APP.dashPeriod);},1500);
+        btn.disabled=false; btn.textContent='تسجيل الدخول';
+        if(!res.success){
+          if(res.expired){closeModal('modal-sub-checkin');openRenewSub(sub.rowIndex);return;}
+          showToast(res.error,'error');return;
+        }
+        closeModal('modal-sub-checkin');
+
+        // ── تحديث الاشتراك في APP فقط ────────────────────────
+        var subInApp=findSub(sub.rowIndex);
+        if(subInApp && res.visitorRowIndex){
+          subInApp.visitsCount=res.visitsCount||(subInApp.visitsCount+1);
+          subInApp.lastVisit=res.entryDate||APP.today;
+          var ids=subInApp.visitIds
+            ?subInApp.visitIds+','+res.visitorRowIndex
+            :String(res.visitorRowIndex);
+          subInApp.visitIds=ids;
+        }
+
+        showToast('تم تسجيل دخول '+sub.name+' ✓','success');
+        silentRefresh(); // هو بيجيب الزيارة الجديدة من الشيت
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تسجيل الدخول';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){
+        btn.disabled=false;btn.textContent='تسجيل الدخول';
+        showToast('خطأ: '+e.message,'error');
+      })
       .processRequest('subCheckin',{subRowIndex:sub.rowIndex});
   });
 }
+   
+
 function initRenewSubModal(){
   function updRnExpiry(){var s=document.getElementById('rn-new-start').value;var v=parseInt(document.getElementById('rn-new-validity').value)||0;if(s&&v>0)document.getElementById('rn-new-expiry-out').value=addDaysToYMD(s,v);else document.getElementById('rn-new-expiry-out').value='';}
   document.getElementById('rn-new-start').addEventListener('change',updRnExpiry);
@@ -796,10 +872,9 @@ function initRenewSubModal(){
       .withSuccessHandler(function(res){
         btn.disabled=false;btn.textContent='تأكيد التجديد';
         if(!res.success){showToast(res.error,'error');return;}
-        APP.subscriptions.unshift({rowIndex:res.rowIndex,subId:res.subId,name:data.name,phone:data.phone,pipeline:data.pipeline,subType:data.subType,startDate:toDMY(data.startDate),expiryDate:res.expiryDate,cost:data.cost,payType:data.payType,paid:data.paid?'نعم':'لا',notes:'',visitsCount:0,lastVisit:'',visitIds:'',totalHours:0,isExpired:false});
-        closeModal('modal-renew-sub');renderWeeklySubs();renderMonthlySubs();
+        closeModal('modal-renew-sub');
+        silentRefresh();
         showToast('تم تجديد اشتراك '+data.name+' ✓','success');
-        setTimeout(function(){loadDashboard(APP.dashPeriod);},1500);
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد التجديد';showToast('خطأ: '+e.message,'error');})
       .processRequest('addSub',data);
@@ -836,37 +911,96 @@ function updateEsCalcDur(){
   var el=document.getElementById('es-calc-dur');if(!el)return;
   if(ti&&to){var a=ti.split(':'),b=to.split(':');var d=(+b[0]*60+ +b[1])-(+a[0]*60+ +a[1]);el.textContent=d>0?(Math.floor(d/60)+'س '+(d%60>0?d%60+'د':'')):'—';}else el.textContent='—';
 }
+
+
+
 function initEditSubModal(){
-  ['es-entry-time','es-exit-time'].forEach(function(id){var el=document.getElementById(id);if(el)el.addEventListener('change',updateEsCalcDur);});
-  document.getElementById('btn-es-submit').addEventListener('click',function(){
-    var btn=this;
-    var esCost=parseFloat(document.getElementById('es-cost').value)||0;
-    var esAPEl=document.getElementById('es-amount-paid'),esAmtPaid=esAPEl?(parseFloat(esAPEl.value)||0):null;
-    var data={rowIndex:APP.activeSubRow,name:document.getElementById('es-name').value.trim(),phone:document.getElementById('es-phone').value.trim(),pipeline:document.getElementById('es-pipeline').value,expiryDate:document.getElementById('es-expiry').value,cost:esCost,payType:document.getElementById('es-paytype').value,account:document.getElementById('es-account').value||'',paid:document.getElementById('es-paid').checked?'نعم':'لا',notes:document.getElementById('es-notes').value.trim()};
-    if(esAmtPaid!==null)data.amountPaid=esAmtPaid;
-    var ts=document.getElementById('es-time-section'),visRow=ts&&ts.dataset.visRow?+ts.dataset.visRow:null;
-    if(visRow&&ts.style.display!=='none'){var et=document.getElementById('es-entry-time').value,xt=document.getElementById('es-exit-time').value;data._visRow=visRow;data._entryTime=et?et+':00':'';data._exitTime=xt?xt+':00':'';}
-    btn.disabled=true;btn.textContent='جاري...';
+  ['es-entry-time','es-exit-time'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.addEventListener('change', updateEsCalcDur);
+  });
+
+  document.getElementById('btn-es-submit').addEventListener('click', function(){
+    var btn = this;
+    var esCost = parseFloat(document.getElementById('es-cost').value) || 0;
+    var esAPEl = document.getElementById('es-amount-paid');
+    var esAmtPaid = esAPEl ? (parseFloat(esAPEl.value) || 0) : null;
+
+    var data = {
+      rowIndex    : APP.activeSubRow,
+      name        : document.getElementById('es-name').value.trim(),
+      phone       : document.getElementById('es-phone').value.trim(),
+      pipeline    : document.getElementById('es-pipeline').value,
+      expiryDate  : document.getElementById('es-expiry').value,
+      cost        : esCost,
+      payType     : document.getElementById('es-paytype').value,
+      account     : document.getElementById('es-account') ? document.getElementById('es-account').value||'' : '',
+      paid        : document.getElementById('es-paid').checked ? 'نعم' : 'لا',
+      notes       : document.getElementById('es-notes').value.trim()
+    };
+    if(esAmtPaid !== null) data.amountPaid = esAmtPaid;
+
+    // ── قراءة بيانات الوقت ──────────────────────────────────
+    var ts     = document.getElementById('es-time-section');
+    var visRow = ts && ts.dataset.visRow ? +ts.dataset.visRow : null;
+    var hasTime = !!(visRow && ts && ts.style.display !== 'none');
+    var et = (document.getElementById('es-entry-time').value || '').trim();
+    var xt = (document.getElementById('es-exit-time').value || '').trim();
+
+    btn.disabled = true; btn.textContent = 'جاري...';
+
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='حفظ التعديلات';
-        if(!res.success){showToast(res.error,'error');return;}
-        if(data._visRow&&(data._entryTime||data._exitTime)){google.script.run.processRequest('updateSubVisitorTimes',{visitorRowIndex:data._visRow,subRowIndex:APP.activeSubRow,entryTime:data._entryTime,exitTime:data._exitTime});}
-        var s=findSub(APP.activeSubRow);
-        if(s){s.name=data.name;s.phone=data.phone;s.pipeline=data.pipeline;s.cost=String(esCost);s.payType=data.payType;s.account=data.account||'';s.paid=data.paid;s.notes=data.notes;if(esAmtPaid!==null){s.amountPaid=esAmtPaid;s.amountRemaining=Math.max(0,esCost-esAmtPaid);}}
-        closeModal('modal-edit-sub');renderWeeklySubs();renderMonthlySubs();
-        showToast('تم الحفظ ✓','success');setTimeout(function(){loadDashboard(APP.dashPeriod);},800);
+        if(!res.success){
+          btn.disabled=false; btn.textContent='حفظ التعديلات';
+          showToast(res.error,'error');
+          return;
+        }
+
+        // ── إذا في وقت للتحديث، أرسل طلب منفصل ───────────
+        if(hasTime && (et || xt)){
+          google.script.run
+            .withSuccessHandler(function(res2){
+              btn.disabled=false; btn.textContent='حفظ التعديلات';
+              closeModal('modal-edit-sub');
+              silentRefresh();
+              if(!res2.success){
+                showToast('تحذير: فشل تحديث الأوقات — '+res2.error,'error');
+              } else {
+                showToast('تم الحفظ مع تحديث الأوقات ✓','success');
+              }
+            })
+            .withFailureHandler(function(e){
+              btn.disabled=false; btn.textContent='حفظ التعديلات';
+              closeModal('modal-edit-sub');
+              silentRefresh();
+              showToast('تحذير: فشل تحديث الأوقات','error');
+            })
+            .processRequest('updateSubVisitorTimes',{
+              visitorRowIndex : visRow,
+              subRowIndex     : APP.activeSubRow,
+              entryTime       : et ? et+':00' : '',
+              exitTime        : xt ? xt+':00' : ''
+            });
+        } else {
+          btn.disabled=false; btn.textContent='حفظ التعديلات';
+          closeModal('modal-edit-sub');
+          silentRefresh();
+          showToast('تم الحفظ ✓','success');
+        }
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast('خطأ: '+e.message,'error');})
-      .processRequest('updateSub',data);
+      .withFailureHandler(function(e){
+        btn.disabled=false; btn.textContent='حفظ التعديلات';
+        showToast('خطأ: '+e.message,'error');
+      })
+      .processRequest('updateSub', data);
   });
 }
-
 // ================================================================
 // HALLS
 // ================================================================
 function loadAndRenderHalls(){
-  document.getElementById('halls-tbody').innerHTML='<tr><td colspan="13" class="empty-state">جاري التحميل...</td></tr>';
+  document.getElementById('halls-tbody').innerHTML='<td colspan="13" class="empty-state">جاري التحميل...</td>';
   google.script.run
     .withSuccessHandler(function(d){APP.hallBookings=d||[];renderHalls();})
     .withFailureHandler(function(e){showToast('فشل تحميل الحجوزات: '+e.message,'error');})
@@ -886,7 +1020,7 @@ function renderHalls(){
   setText('kpi-hall-hours',kl.length?(Math.floor(mins/60)+'س '+(mins%60>0?mins%60+'د':'')):'0س');
   setText('kpi-hall-unpaid','₪'+unpaid);
   var tb=document.getElementById('halls-tbody');
-  if(!list.length){tb.innerHTML='<tr><td colspan="13" class="empty-state">لا توجد حجوزات</td></tr>';return;}
+  if(!list.length){tb.innerHTML='<td colspan="13" class="empty-state">لا توجد حجوزات</td>';return;}
   tb.innerHTML=list.map(function(b){
     var pb=b.paid==='نعم'?'<span class="badge badge-paid">مدفوع</span>':'<span class="badge badge-unpaid">غير مدفوع</span>';
     return '<tr><td>'+b.name+'</td><td>'+b.phone+'</td><td><span class="badge badge-room">'+b.hall+'</span></td><td>'+b.date+'</td><td>'+(b.day||'')+'</td><td>'+b.start+'</td><td>'+b.end+'</td><td>'+(b.duration||'—')+'</td><td>'+(b.chairs?b.chairs+' 🪑':'—')+'</td><td>'+(b.revenue?'₪'+b.revenue:'—')+'</td><td>'+(b.payType||'—')+'</td><td>'+pb+'</td><td><div class="td-actions"><button class="btn btn-secondary btn-sm hall-ed" data-row="'+b.rowIndex+'">تعديل</button></div></td></tr>';
@@ -913,7 +1047,7 @@ function initHallBookModal(){
     if(!data.name||!data.hall||!data.date||!data.start||!data.end){showToast('يرجى تعبئة الحقول المطلوبة','error');return;}
     btn.disabled=true;btn.textContent='جاري...';
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='تأكيد الحجز';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-hall-book');showToast('تم الحجز ✓','success');loadAndRenderHalls();})
+      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='تأكيد الحجز';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-hall-book');showToast('تم الحجز ✓','success');silentRefresh();})
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد الحجز';showToast('خطأ: '+e.message,'error');})
       .processRequest('addBooking',data);
   });
@@ -944,14 +1078,14 @@ function initEditHallModal(){
     if(ehAmtPaid!==null)data.amountPaid=ehAmtPaid;
     btn.disabled=true;btn.textContent='جاري...';
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حفظ';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('تم الحفظ ✓','success');loadAndRenderHalls();})
+      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حفظ';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('تم الحفظ ✓','success');silentRefresh();})
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ';showToast('خطأ: '+e.message,'error');})
       .processRequest('updateRoom',data);
   });
   document.getElementById('btn-eh-delete').addEventListener('click',function(){
     var btn=this;if(!confirm('هل أنت متأكد من الحذف؟'))return;btn.disabled=true;btn.textContent='جاري...';
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حذف';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('تم الحذف','success');loadAndRenderHalls();})
+      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حذف';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('تم الحذف','success');silentRefresh();})
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حذف';showToast('خطأ: '+e.message,'error');})
       .processRequest('deleteBooking',{rowIndex:APP.activeHallRow});
   });
@@ -965,7 +1099,7 @@ function renderTamkeen(){
   var search=((document.getElementById('t-search')||{}).value||'').trim().toLowerCase();
   var list=APP.tamkeen.filter(function(s){if(s.date)return false;if(APP.tkGroup!=='all'&&s.group!==APP.tkGroup)return false;if(search&&s.name.toLowerCase().indexOf(search)===-1)return false;return true;});
   var tb=document.getElementById('tamkeen-tbody');
-  if(!list.length){tb.innerHTML='<tr><td colspan="9" class="empty-state">لا توجد نتائج</td></tr>';return;}
+  if(!list.length){tb.innerHTML='<td colspan="9" class="empty-state">لا توجد نتائج</td>';return;}
   tb.innerHTML=list.map(function(s){
     var sess=APP.tkSession[s.rowIndex||s.ri];
     var ti=(sess&&sess.in)?sess.in:(s.timeIn||''),to=(sess&&sess.out)?sess.out:(s.timeOut||'');
@@ -973,46 +1107,85 @@ function renderTamkeen(){
     var isIn=!!(ti&&!to),isDone=!!(ti&&to);
     var durDisplay=isDone?durLabel(ti,to):(isIn?(isFrozenLocal?'<span style="color:var(--warning)">⏸ مجمّد</span>':'<span style="color:var(--accent)">جاري...</span>'):'—');
     var sb=isIn?(isFrozenLocal?'<span class="badge badge-warning">⏸ مجمّد</span>':'<span class="badge badge-active">داخل</span>'):(isDone?'<span class="badge badge-paid">خرج</span>':'<span class="badge badge-done">لم يحضر</span>');
-    var cost=isDone?(s.cost?'₪'+s.cost:'—'):'—';
+    
+    var snackAmtDisplay = parseFloat(s.snack)||0;
+    var snackBadge = snackAmtDisplay>0
+      ?(' <span class="badge" style="background:#fef3c7;color:#d97706;font-size:.65rem;">☕₪'+snackAmtDisplay+(s.snackPaid==='نعم'?' ✓':'')+'</span>')
+      :'';
+    var cost = isDone ? (s.cost ? '₪'+s.cost : '—') : '—';
+    cost += snackBadge; 
+
+
     var tkRow=s.rowIndex||s.ri,attRow=s.attendanceRowIndex;
     var sessX=APP.tkSession[tkRow],isFrozen=!!(sessX&&sessX.freeze)||(s.freezeTime&&!to);
     var acts='<div class="td-actions">';
-    if(!ti){acts+='<button class="btn btn-primary btn-sm tk-ci" data-row="'+tkRow+'">دخول</button>';}
-    else if(isIn){
+    if(!ti){
+      acts+='<button class="btn btn-primary btn-sm tk-ci" data-row="'+tkRow+'">دخول</button>';
+    } else if(isIn){
       acts+='<button class="btn btn-danger btn-sm tk-co" data-row="'+tkRow+'">خروج</button>';
-      acts+=isFrozen?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreezeTk('+tkRow+','+attRow+')">▶ استئناف</button>':'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreezeTk('+tkRow+','+attRow+')" title="تجميد">⏸</button>';
+      acts+=isFrozen
+        ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreezeTk('+tkRow+','+attRow+')">▶ استئناف</button>'
+        :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreezeTk('+tkRow+','+attRow+')" title="تجميد">⏸</button>';
+      acts+='<button class="btn btn-secondary btn-sm" onclick="openTkSnack('+tkRow+','+attRow+')" title="إضافة سناك">☕ سناك</button>';
+    }
+    var snackAmt=parseFloat(s.snack)||0;
+    var snackPaid=s.snackPaid||'';
+    if(snackAmt>0&&snackPaid!=='نعم'){
+      acts+='<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="payTkSnack('+tkRow+','+attRow+')">دفع سناك ₪'+snackAmt+'</button>';
     }
     acts+='<button class="btn btn-secondary btn-sm tk-ed" data-row="'+tkRow+'">تعديل</button></div>';
+
     var rc=isIn?'row-active':(isDone?'':'');
-    return '<tr class="'+rc+'"><td>'+s.group+'</td><td>'+s.name+'</td><td>'+s.phone+'</td><td>'+(ti?ti.slice(0,5):'—')+'</td><td>'+(to?to.slice(0,5):'—')+'</td><td>'+durDisplay+'</td><td>'+cost+'</td><td>'+sb+'</td><td>'+acts+'</td></tr>';
-  }).join('');
+    return '<tr class="'+rc+'"><td>'+s.group+'</td><td>'+s.name+'</td><td>'+s.phone+'</td><td>'+(ti?ti.slice(0,5):'—')+'</td><td>'+(to?to.slice(0,5):'—')+'</td><td>'+durDisplay+'</td><td>'+cost+'</td><td>'+sb+'</td><td>'+acts+'</td></tr>';}).join('');
+
+
   tb.querySelectorAll('.tk-ci').forEach(function(b){b.addEventListener('click',function(){tkCheckin(+b.dataset.row);});});
   tb.querySelectorAll('.tk-co').forEach(function(b){b.addEventListener('click',function(){tkCheckout(+b.dataset.row);});});
   tb.querySelectorAll('.tk-ed').forEach(function(b){b.addEventListener('click',function(){openEditTamkeen(+b.dataset.row);});});
 }
+
+
 function renderTkKPIs(){
-  var today=APP.today,mins=0,count=0,cost=0;
+  var today=APP.today;
+  var mins=0,count=0,cost=0;
+
   APP.tamkeen.forEach(function(s){
-    if(s.date)return;
-    var sess=APP.tkSession[s.rowIndex],liveIn=sess?sess.in:null,liveOut=sess?sess.out:null;
-    var ti=liveIn||s.timeIn||'',to=liveOut||s.timeOut||'';
-    var attended=!!(ti&&(s.todayDate===today||liveIn));
-    if(!attended)return;
-    count++;cost+=parseFloat(s.cost)||0;
-    if(ti&&to){var a=ti.split(':'),b=to.split(':');var d=(+b[0]*60+ +b[1])-(+a[0]*60+ +a[1]);if(d>0)mins+=d;}
+    if(s.date) return; 
+
+    var sess=APP.tkSession[s.rowIndex];
+    var liveIn=sess?sess.in:null;
+    var liveOut=sess?sess.out:null;
+    var ti=liveIn||s.timeIn||'';
+    var to=liveOut||s.timeOut||'';
+
+    // الطالب حضر اليوم إذا في وقت دخول وتاريخه اليوم
+    var attendedToday=!!(ti&&(s.todayDate===today||liveIn));
+    if(!attendedToday) return;
+
+    count++;
+    cost+=parseFloat(s.cost)||0;
+
+    if(ti&&to){
+      var a=ti.split(':'),b=to.split(':');
+      var diff=(+b[0]*60+ +b[1])-(+a[0]*60+ +a[1]);
+      if(diff>0) mins+=diff;
+    }
   });
+
   var h=Math.floor(mins/60),m=mins%60;
-  setText('kpi-tk-hours',mins>0?(h+'س '+(m>0?m+'د':'')):'0س');
-  setText('kpi-tk-count',count);setText('kpi-tk-cost','₪'+cost.toFixed(2));
+  setText('kpi-tk-hours', mins>0?(h+'س '+(m>0?m+'د':'')):'0س');
+  setText('kpi-tk-count', count);
+  setText('kpi-tk-cost',  '₪'+cost.toFixed(2));
 }
+
+
 function doFreezeTk(baseRow,attRow){
   if(!attRow){showToast('يرجى الانتظار لحظة...','warn');return;}
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
-      var s=APP.tamkeen.find(function(x){return(x.rowIndex||x.ri)===baseRow;});if(s)s.freezeTime=res.freezeTime;
-      var sess=APP.tkSession[baseRow];if(sess)sess.freeze=res.freezeTime;
-      renderTamkeen();showToast('⏸ تم تجميد وقت الطالب — '+res.durationSoFar,'success');
+      silentRefresh();
+      showToast('⏸ تم تجميد وقت الطالب — '+res.durationSoFar,'success');
     })
     .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
     .processRequest('freezeTamkeenTime',{attendanceRowIndex:attRow});
@@ -1022,9 +1195,8 @@ function doUnfreezeTk(baseRow,attRow){
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
-      var s=APP.tamkeen.find(function(x){return(x.rowIndex||x.ri)===baseRow;});if(s){s.freezeTime='';s.timeIn=res.newEntryTime;}
-      var sess=APP.tkSession[baseRow];if(sess){sess.freeze='';sess.in=res.newEntryTime;}
-      renderTamkeen();showToast('▶ تم استئناف الوقت للطالب','success');
+      silentRefresh();
+      showToast('▶ تم استئناف الوقت للطالب','success');
     })
     .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
     .processRequest('unfreezeTamkeenTime',{attendanceRowIndex:attRow});
@@ -1055,7 +1227,6 @@ function tkCheckout(ri){
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){showToast('فشل الخروج: '+res.error,'error');if(sess)sess.out=null;if(student)student.timeOut='';renderTamkeen();return;}
-      if(student){student.timeOut=res.timeOut;student.duration=res.duration;student.durationH=res.durationH;student.cost=String(res.cost||0);student.todayDate=APP.today;}
       renderTamkeen();renderTkKPIs();
       showToast('تم تسجيل خروج '+(student?student.name:'')+' ✓','success');
       setTimeout(function(){loadDashboard(APP.dashPeriod);},1500);
@@ -1082,7 +1253,7 @@ function initEditTamkeenModal(){
     btn.disabled=true;btn.textContent='جاري...';
     var attIdx=s&&s.attendanceRowIndex?s.attendanceRowIndex:(APP.tkSession[ri]&&APP.tkSession[ri].attendanceRowIndex);
     var needsTimeUpdate=attIdx&&(ti||to),pending=needsTimeUpdate?2:1;
-    function done(){pending--;if(pending<=0){closeModal('modal-edit-tamkeen');renderTamkeen();showToast('تم الحفظ ✓','success');}}
+    function done(){pending--;if(pending<=0){closeModal('modal-edit-tamkeen');silentRefresh();showToast('تم الحفظ ✓','success');}}
     google.script.run
       .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حفظ التعديلات';if(!res.success){showToast(res.error,'error');return;}if(s)Object.assign(s,{group:data.group,name:data.name,phone:data.phone,email:data.email,notes:data.notes});done();})
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast('خطأ: '+e.message,'error');})
@@ -1117,7 +1288,7 @@ document.addEventListener('keydown',function(e){
 
 function loadFutureBookings(){
   var tb=document.getElementById('future-tbody');
-  if(tb) tb.innerHTML='<tr><td colspan="9" class="empty-state">جاري التحميل...</td></tr>';
+  if(tb) tb.innerHTML='<td colspan="9" class="empty-state">جاري التحميل...</td>';
 
   // حجوزات الكراسي من شيت "حجوزات مسبقة"
   google.script.run
@@ -1137,7 +1308,7 @@ function renderFutureHalls(list){
   var tb=document.getElementById('future-halls-tbody');
   if(!tb) return;
   if(!list.length){
-    tb.innerHTML='<tr><td colspan="8" class="empty-state">لا توجد حجوزات قاعات مستقبلية</td></tr>';
+    tb.innerHTML='<td colspan="8" class="empty-state">لا توجد حجوزات قاعات مستقبلية</td>';
     return;
   }
   tb.innerHTML=list.map(function(b){
@@ -1172,8 +1343,7 @@ function renderFutureHalls(list){
           btn.disabled=false;
           if(!res.success){showToast(res.error||'فشل','error');btn.textContent='إلغاء ✕';return;}
           showToast('تم إلغاء حجز القاعة ✓','success');
-          var row=btn.closest('tr');if(row)row.remove();
-          loadFutureBookings();
+          silentRefresh();
         })
         .withFailureHandler(function(e){btn.disabled=false;btn.textContent='إلغاء ✕';showToast(e.message,'error');})
         .processRequest('deleteBooking',{rowIndex:+btn.dataset.row});
@@ -1191,7 +1361,7 @@ function renderFutureBookings(list){
   if(badge){badge.textContent=list.length||'';badge.style.display=list.length?'flex':'none';}
 
   if(!list.length){
-    tb.innerHTML='<tr><td colspan="9" class="empty-state">لا توجد حجوزات مسبقة</td></tr>';
+    tb.innerHTML='<td colspan="9" class="empty-state">لا توجد حجوزات مسبقة</td>';
     return;
   }
 
@@ -1244,24 +1414,9 @@ function renderFutureBookings(list){
         .withSuccessHandler(function(res){
           btn.disabled=false; btn.textContent='دخول الآن';
           if(!res||!res.success){showToast((res&&res.error)||'فشل تسجيل الدخول','error');return;}
-          // أزل الصف فوراً
-          var parentRow=btn.closest('tr'); if(parentRow) parentRow.remove();
-          // حدّث badge
-          var badge2=document.getElementById('future-badge');
-          var rows2=document.querySelectorAll('#future-tbody tr:not(.empty-state)');
-          if(badge2){badge2.textContent=rows2.length||'';badge2.style.display=rows2.length?'flex':'none';}
-          // أضف لـ APP.visitors
-          APP.visitors.unshift({
-            rowIndex:res.rowIndex, ri:res.rowIndex, name:res.name||name,
-            phone:'', entryDate:res.entryDate, date:res.entryDate,
-            entryTime:res.entryTime, exitTime:'', duration:'', durationH:0,
-            subType:'', pipeline:'', firstVisit:res.isFirstVisit?'نعم':'لا',
-            cost:'', paid:'لا', amountPaid:0, amountRemaining:0, freezeTime:''
-          });
+          silentRefresh();
           showToast('تم تسجيل دخول '+name+' ✓','success');
           if(res.isFirstVisit) showToast('زيارة أولى ⭐','success');
-          renderVisitors(); renderVKPIs();
-          setTimeout(function(){loadDashboard(APP.dashPeriod);},1200);
         })
         .withFailureHandler(function(e){btn.disabled=false;btn.textContent='دخول الآن';showToast('خطأ: '+(e.message||''),'error');})
         .processRequest('checkinFromFuture',{futureRowIndex:ri});
@@ -1300,15 +1455,9 @@ function renderFutureBookings(list){
           btn.disabled=false; btn.textContent='إلغاء ✕';
           if(!res.success){showToast(res.error||'فشل','error');return;}
           showToast('تم إلغاء حجز '+name+' ✓','success');
-          var parentRow=btn.closest('tr'); if(parentRow) parentRow.remove();
-          // حدّث badge
-          var badge3=document.getElementById('future-badge');
-          var rows3=document.querySelectorAll('#future-tbody tr:not(.empty-state)');
-          if(badge3){badge3.textContent=rows3.length||'';badge3.style.display=rows3.length?'flex':'none';}
-          setTimeout(function(){loadDashboard(APP.dashPeriod);},800);
+          silentRefresh();
         })
         .withFailureHandler(function(e){btn.disabled=false;btn.textContent='إلغاء ✕';showToast('خطأ: '+(e.message||''),'error');})
-        // الآن يستخدم cancelFutureBooking وليس cancelVisitorBooking
         .processRequest('cancelFutureBooking',{rowIndex:ri});
     });
   });
@@ -1348,11 +1497,9 @@ function initFutureEditModal(){
         if(!res.success){showToast(res.error||'فشل','error');return;}
         closeModal('modal-future-edit');
         showToast('تم حفظ التعديلات ✓','success');
-        loadFutureBookings();
-        if(cost>0)setTimeout(function(){loadDashboard(APP.dashPeriod);},800);
+        silentRefresh();
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast(e.message,'error');})
-      // يستخدم updateFutureBooking وليس updateVisitor
       .processRequest('updateFutureBooking',{
         rowIndex:ri, name:name, phone:phone, subType:sub,
         date:dateDMY, cost:cost, amountPaid:paid, amountRemaining:rem,
@@ -1377,6 +1524,199 @@ function _applyRoleUI(){
   }
 }
 
+
+
+function openSnack(rowIndex, subRowIndex){
+  APP._snackRow    = rowIndex;
+  APP._snackSubRow = subRowIndex || null;
+
+  var name = '', baseCost = 0, currentSnack = 0;
+
+  if(subRowIndex){
+    var sub = findSub(subRowIndex);
+    if(!sub){showToast('الاشتراك غير موجود','error'); return;}
+    name        = sub.name;
+    baseCost    = parseFloat(sub.cost) || 0;
+    currentSnack = 0; // الاشتراكات لا تتتبع السناك بعمود منفصل
+    APP._snackBase    = baseCost;
+    APP._snackAmtPaid = parseFloat(sub.amountPaid) || 0;
+  } else {
+    var v = findVisitor(rowIndex);
+    if(!v){showToast('الزائر غير موجود','error'); return;}
+    name        = v.name;
+    baseCost    = parseFloat(v.cost) || 0;
+    currentSnack = parseFloat(v.snack) || 0;
+    APP._snackBase    = baseCost;
+    APP._snackAmtPaid = null;
+  }
+
+  document.getElementById('snk-visitor-name').textContent  = name;
+  document.getElementById('snk-base-cost').textContent     = '₪' + baseCost;
+  document.getElementById('snk-current-snack').textContent = currentSnack > 0 ? '₪' + currentSnack : '—';
+  document.getElementById('snk-amount').value              = '';
+  document.getElementById('snk-note').value                = '';
+  APP._snackNote = '';
+  document.getElementById('snk-total-display').textContent = '₪' + baseCost;
+  openModal('modal-snack');
+  setTimeout(function(){ document.getElementById('snk-amount').focus(); }, 150);
+}
+
+
+// snack modal
+
+function initSnackModal(){
+  var amtEl = document.getElementById('snk-amount');
+
+  amtEl.addEventListener('input', function(){
+    var adding = parseFloat(this.value) || 0;
+    var total  = (APP._snackBase || 0) + adding;
+    document.getElementById('snk-total-display').textContent = '₪' + total.toFixed(2);
+  });
+
+  amtEl.addEventListener('keydown', function(e){
+    if(e.key === 'Enter') document.getElementById('btn-snk-confirm').click();
+  });
+
+  document.getElementById('snk-note').addEventListener('input', function(){
+    APP._snackNote = this.value.trim();
+  });
+
+  document.getElementById('btn-snk-confirm').addEventListener('click', function(){
+    var btn    = this;
+    var adding = parseFloat(amtEl.value) || 0;
+    if(adding <= 0){ showToast('أدخل مبلغاً أكبر من صفر','error'); return; }
+
+    btn.disabled = true; btn.textContent = 'جاري...';
+
+
+
+
+
+     //------------------------------
+      // ── تمكين ────────────────────────────────────────────────
+    if(APP._tkSnackMode){
+      APP._tkSnackMode = false;
+      google.script.run
+        .withSuccessHandler(function(res){
+          btn.disabled=false; btn.textContent='إضافة للحساب ✓';
+          if(!res.success){ showToast(res.error,'error'); return; }
+          var s=APP.tamkeen.find(function(x){ return (x.rowIndex||x.ri)===APP._tkSnackBaseRow; });
+          if(s){ s.snack=res.snack; s.snackPaid='لا'; }
+          closeModal('modal-snack');
+          renderTamkeen();
+          showToast('تمت إضافة سناك ₪'+adding+' للطالب ✓','success');
+          silentRefresh();
+        })
+        .withFailureHandler(function(e){
+          btn.disabled=false; btn.textContent='إضافة للحساب ✓';
+          showToast('خطأ: '+e.message,'error');
+        })
+        .processRequest('addSnackToTamkeen',{
+          attendanceRowIndex : APP._tkSnackAttRow,
+          amount             : adding,
+          note               : APP._snackNote||''
+        });
+      return;
+    }
+     //------------------
+
+
+
+
+    if(APP._snackSubRow){
+      // اشتراك — نضيف للتكلفة
+      var sub = findSub(APP._snackSubRow);
+      var amtPaid = parseFloat(sub ? sub.amountPaid : 0) || 0;
+      
+      google.script.run
+        .withSuccessHandler(function(res){
+          btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
+          if(!res.success){ showToast(res.error,'error'); return; }
+          closeModal('modal-snack');
+          silentRefresh();
+          showToast('تمت إضافة سناك ₪'+adding+' للاشتراك ✓','success');
+          if(res.amountRemaining > 0) showToast('غير محصّل: ₪'+res.amountRemaining.toFixed(2),'warn');
+        })
+        .withFailureHandler(function(e){
+          btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
+          showToast('خطأ: '+e.message,'error');
+        })
+        .processRequest('addSnackToSubscription',{
+        rowIndex        : APP._snackSubRow,
+        visitorRowIndex : APP._snackRow,
+        amount          : adding,
+        note            : APP._snackNote || ''
+      });
+
+    } else {
+      // فريلانسر — عمود SNACK المنفصل
+      google.script.run
+        .withSuccessHandler(function(res){
+          btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
+          if(!res.success){ showToast(res.error,'error'); return; }
+          // تحديث محلي فوري
+          var v = findVisitor(APP._snackRow);
+          if(v) v.snack = res.snack;
+          closeModal('modal-snack');
+          silentRefresh();
+          showToast('تمت إضافة سناك ₪'+adding+' ✓','success');
+        })
+        .withFailureHandler(function(e){
+          btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
+          showToast('خطأ: '+e.message,'error');
+        })
+        .processRequest('addSnackToVisitor',{
+          rowIndex : APP._snackRow,
+          amount   : adding,
+          note     : APP._snackNote || ''
+        });
+    }
+  });
+}
+
+
+function openTkSnack(baseRow, attRow){
+  if(!attRow){ showToast('يرجى الانتظار...','warn'); return; }
+  var s = APP.tamkeen.find(function(x){ return (x.rowIndex||x.ri)===baseRow; });
+  if(!s){ showToast('الطالب غير موجود','error'); return; }
+
+  APP._tkSnackBaseRow = baseRow;
+  APP._tkSnackAttRow  = attRow;
+  APP._tkSnackBase    = parseFloat(s.snack)||0;
+  APP._tkSnackMode    = true;
+  APP._snackRow       = null;
+  APP._snackSubRow    = null;
+  APP._snackNote      = '';
+
+  document.getElementById('snk-visitor-name').textContent  = s.name;
+  document.getElementById('snk-base-cost').textContent     = APP._tkSnackBase>0?'☕ ₪'+APP._tkSnackBase:'لا يوجد';
+  document.getElementById('snk-amount').value              = '';
+  var noteEl = document.getElementById('snk-note');
+  if(noteEl) noteEl.value = '';
+  document.getElementById('snk-total-display').textContent = '₪'+APP._tkSnackBase;
+  openModal('modal-snack');
+  setTimeout(function(){ document.getElementById('snk-amount').focus(); },150);
+}
+
+function payTkSnack(baseRow, attRow){
+  if(!attRow){ showToast('يرجى الانتظار...','warn'); return; }
+  if(!confirm('تأكيد دفع السناك؟')) return;
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res.success){ showToast(res.error,'error'); return; }
+      var s=APP.tamkeen.find(function(x){ return (x.rowIndex||x.ri)===baseRow; });
+      if(s) s.snackPaid='نعم';
+      renderTamkeen();
+      silentRefresh();
+      showToast('تم تسجيل دفع السناك ✓','success');
+    })
+    .withFailureHandler(function(e){ showToast('خطأ: '+e.message,'error'); })
+    .processRequest('payTamkeenSnack',{attendanceRowIndex:attRow});
+}
+
+
+
+
 // ================================================================
 // INIT — guard against double-init after document.write
 // ================================================================
@@ -1389,6 +1729,7 @@ window.onload=function(){
   initRenewSubModal();initInlinePaymentModal();
   initHallBookModal();initEditHallModal();initEditTamkeenModal();
   initFutureEditModal();
+  initSnackModal();
   boot();
 };
 </script>
