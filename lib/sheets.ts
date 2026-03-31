@@ -1,6 +1,18 @@
 import { google, sheets_v4 } from "googleapis";
 import { cache } from "@/lib/cache";
 
+export type SheetOperation =
+  | {
+      type: "update";
+      row: number;
+      col: number;
+      values: (string | number | boolean)[][];
+    }
+  | {
+      type: "deleteRow";
+      rowIndex: number;
+    };
+
 function assertEnv(name: string, value: string | undefined) {
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
@@ -59,9 +71,27 @@ function normalizeValues(values: unknown[][]): (string | number | boolean)[][] {
   );
 }
 
+function columnToA1(col: number): string {
+  let n = col;
+  let out = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+function buildA1Range(sheetName: string, row: number, col: number, numRows: number, numCols: number): string {
+  const start = `${columnToA1(col)}${row}`;
+  const end = `${columnToA1(col + numCols - 1)}${row + numRows - 1}`;
+  return toRange(sheetName, `${start}:${end}`);
+}
+
 class SheetsClient {
   private api: sheets_v4.Sheets;
   private config: ServiceAccountConfig;
+  private writeLocks = new Map<string, Promise<void>>();
 
   constructor() {
     this.config = getServiceAccountConfig();
@@ -92,6 +122,31 @@ class SheetsClient {
       .filter((title): title is string => Boolean(title));
     cache.set(cacheKey, names, 600);
     return names;
+  }
+
+  private async getSheetId(sheetName: string): Promise<number> {
+    const cacheKey = `sheets:meta:id:${sheetName}`;
+    const cached = cache.get<number>(cacheKey);
+    if (cached !== null) return cached;
+
+    const res = await this.api.spreadsheets.get({
+      spreadsheetId: this.config.sheetId,
+      fields: "sheets.properties.sheetId,sheets.properties.title"
+    });
+    const sheet = (res.data.sheets ?? []).find((s) => s.properties?.title === sheetName);
+    const sheetId = sheet?.properties?.sheetId;
+    if (typeof sheetId !== "number") {
+      throw new Error(`Sheet not found: ${sheetName}`);
+    }
+    cache.set(cacheKey, sheetId, 600);
+    return sheetId;
+  }
+
+  private async withWriteLock(sheetName: string, task: () => Promise<void>): Promise<void> {
+    const previous = this.writeLocks.get(sheetName) ?? Promise.resolve();
+    const next = previous.then(task, task);
+    this.writeLocks.set(sheetName, next.catch(() => {}));
+    await next;
   }
 
   async getSheetValues(sheetName: string): Promise<unknown[][]> {
@@ -156,6 +211,7 @@ class SheetsClient {
       }
     });
     cache.delete("sheets:meta:names");
+    cache.delete(`sheets:meta:id:${sheetName}`);
   }
 
   async clearAndWriteSheet(sheetName: string, values: unknown[][]): Promise<void> {
@@ -184,6 +240,81 @@ class SheetsClient {
       requestBody: {
         majorDimension: "ROWS",
         values: padded
+      }
+    });
+  }
+
+  async updateRange(
+    sheetName: string,
+    row: number,
+    col: number,
+    values: unknown[][]
+  ): Promise<void> {
+    if (!values.length) return;
+    const normalized = normalizeValues(values);
+    const width = normalized.reduce((max, r) => Math.max(max, r.length), 0);
+    if (width <= 0) return;
+    const padded = normalized.map((r) => {
+      const next = r.slice();
+      while (next.length < width) next.push("");
+      return next;
+    });
+    const range = buildA1Range(sheetName, row, col, padded.length, width);
+    await this.api.spreadsheets.values.update({
+      spreadsheetId: this.config.sheetId,
+      range,
+      valueInputOption: "RAW",
+      requestBody: {
+        majorDimension: "ROWS",
+        values: padded
+      }
+    });
+  }
+
+  async appendRow(sheetName: string, row: unknown[]): Promise<void> {
+    await this.api.spreadsheets.values.append({
+      spreadsheetId: this.config.sheetId,
+      range: toRange(sheetName, "A:ZZ"),
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: {
+        majorDimension: "ROWS",
+        values: [normalizeValues([row])[0] ?? []]
+      }
+    });
+  }
+
+  async deleteRow(sheetName: string, rowIndex: number): Promise<void> {
+    const sheetId = await this.getSheetId(sheetName);
+    await this.api.spreadsheets.batchUpdate({
+      spreadsheetId: this.config.sheetId,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: "ROWS",
+                startIndex: rowIndex - 1,
+                endIndex: rowIndex
+              }
+            }
+          }
+        ]
+      }
+    });
+  }
+
+  async applyOperations(sheetName: string, operations: SheetOperation[]): Promise<void> {
+    if (!operations.length) return;
+    await this.ensureSheetExists(sheetName);
+    await this.withWriteLock(sheetName, async () => {
+      for (const op of operations) {
+        if (op.type === "update") {
+          await this.updateRange(sheetName, op.row, op.col, op.values);
+        } else if (op.type === "deleteRow") {
+          await this.deleteRow(sheetName, op.rowIndex);
+        }
       }
     });
   }

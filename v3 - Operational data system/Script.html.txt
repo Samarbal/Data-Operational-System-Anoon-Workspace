@@ -26,8 +26,8 @@ function boot() {
     .withSuccessHandler(function(d) {
       try{
         APP.visitors      = Array.isArray(d&&d.visitors) ? d.visitors : [];
-        APP.subscriptions = Array.isArray(d&&d.subscriptions) ? d.subscriptions : [];
-        APP.tamkeen       = Array.isArray(d&&d.tamkeen) ? d.tamkeen : [];
+        APP.subscriptions = [];
+        APP.tamkeen       = [];
         APP.opts          = (d&&d.opts) || {};
         APP.today         = (d&&d.today) || '';
         APP.todayDay      = (d&&d.todayDay) || '';
@@ -44,6 +44,17 @@ function boot() {
         _applyRoleUI();
         loadAndRenderHalls();
         loadFutureBookings();
+        // Deferred secondary fetch: subscriptions + tamkeen only.
+        google.script.run
+          .withSuccessHandler(function(sec){
+            APP.subscriptions = Array.isArray(sec&&sec.subscriptions) ? sec.subscriptions : [];
+            APP.tamkeen       = Array.isArray(sec&&sec.tamkeen) ? sec.tamkeen : [];
+            renderWeeklySubs();
+            renderMonthlySubs();
+            renderTamkeen();
+          })
+          .withFailureHandler(function(){})
+          .getSecondaryData();
       }catch(err){
         var m=(err&&err.message)?err.message:String(err||'');
         showToast('تعذّر تجهيز الواجهة: '+m,'error');
@@ -53,7 +64,7 @@ function boot() {
       }
     })
     .withFailureHandler(function(e){ showToast('فشل التحميل: '+e.message,'error'); })
-    .getInitialData();
+    .getBootData();
 }
 
 
@@ -309,22 +320,31 @@ function silentRefresh(){
   google.script.run
     .withSuccessHandler(function(d){
       APP.visitors = d.visitors || [];
-      APP.subscriptions = d.subscriptions || [];
-      APP.tamkeen = d.tamkeen || [];
       APP.dashData = d.dashboard || {};
       APP.today         = d.today || APP.today;
 
       renderDashboard();
       renderVisitors();
-      renderWeeklySubs();
-      renderMonthlySubs();
-      renderTamkeen();
       renderVKPIs();
       if(document.getElementById('pg-rooms').classList.contains('active')) loadAndRenderHalls();
       loadFutureBookings();
+      var activePage=((document.querySelector('.page.active')||{}).id||'').toLowerCase();
+      var needSecondary=activePage.indexOf('sub')!==-1||activePage.indexOf('tamkeen')!==-1;
+      if(needSecondary){
+        google.script.run
+          .withSuccessHandler(function(sec){
+            APP.subscriptions = sec.subscriptions || [];
+            APP.tamkeen = sec.tamkeen || [];
+            renderWeeklySubs();
+            renderMonthlySubs();
+            renderTamkeen();
+          })
+          .withFailureHandler(function(){})
+          .getSecondaryData();
+      }
     })
     .withFailureHandler(function(){})
-    .getInitialData();
+    .getBootData();
 }
 setInterval(function(){
   var dashActive=document.getElementById('pg-dash')&&document.getElementById('pg-dash').classList.contains('active');

@@ -30,6 +30,15 @@ export async function POST(
     return NextResponse.json(result);
   }
 
+  if (action === "getBootData" || action === "getSecondaryData") {
+    const key = cacheKey(action, body);
+    const cached = cache.get<unknown>(key);
+    if (cached !== null) return NextResponse.json(cached);
+    const result = await callLegacyMethod(action);
+    cache.set(key, result, 90);
+    return NextResponse.json(result);
+  }
+
   if (READ_HEAVY_ACTIONS.has(action)) {
     const key = cacheKey(action, body);
     const cached = cache.get<unknown>(key);

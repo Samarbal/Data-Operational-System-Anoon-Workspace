@@ -3,6 +3,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { cache } from "@/lib/cache";
 import { getSheetsClient } from "@/lib/sheets";
+import type { SheetOperation } from "@/lib/sheets";
 
 type Scalar = string | number | boolean | Date | null | undefined;
 type Row = Scalar[];
@@ -39,14 +40,19 @@ class RangeEmulator {
   }
 
   setValues(values: Matrix): this {
+    const written: Matrix = [];
     for (let r = 0; r < this.numRows; r += 1) {
       const incoming = values[r] ?? [];
       const rowRef = this.sheet.ensureRow(this.row + r);
+      const outRow: Row = [];
       for (let c = 0; c < this.numCols; c += 1) {
-        rowRef[this.col + c - 1] = incoming[c] ?? "";
+        const value = incoming[c] ?? "";
+        rowRef[this.col + c - 1] = value;
+        outRow.push(value);
       }
+      written.push(outRow);
     }
-    this.sheet.markDirty();
+    this.sheet.recordUpdate(this.row, this.col, written);
     return this;
   }
 
@@ -67,6 +73,7 @@ class SheetEmulator {
   private rows: Matrix;
   private dirty = false;
   private created = false;
+  private operations: SheetOperation[] = [];
 
   constructor(
     private readonly name: string,
@@ -85,6 +92,10 @@ class SheetEmulator {
     this.dirty = true;
   }
 
+  clearDirty(): void {
+    this.dirty = false;
+  }
+
   isDirty(): boolean {
     return this.dirty || this.created;
   }
@@ -95,6 +106,24 @@ class SheetEmulator {
 
   clearCreatedFlag(): void {
     this.created = false;
+  }
+
+  getOperations(): SheetOperation[] {
+    return this.operations.slice();
+  }
+
+  clearOperations(): void {
+    this.operations = [];
+  }
+
+  recordUpdate(row: number, col: number, values: Matrix): void {
+    this.operations.push({
+      type: "update",
+      row,
+      col,
+      values: values as (string | number | boolean)[][]
+    });
+    this.markDirty();
   }
 
   getLastRow(): number {
@@ -126,6 +155,10 @@ class SheetEmulator {
   deleteRow(rowIndex: number): void {
     if (rowIndex < 1 || rowIndex > this.rows.length) return;
     this.rows.splice(rowIndex - 1, 1);
+    this.operations.push({
+      type: "deleteRow",
+      rowIndex
+    });
     this.markDirty();
   }
 
@@ -231,7 +264,7 @@ function getCompiledLegacyScript(): vm.Script {
   return compiled;
 }
 
-const SNAPSHOT_TTL_SECONDS = 120;
+const SNAPSHOT_TTL_SECONDS = 90;
 
 const SHEETS = {
   VISITORS: "سجل الزوار",
@@ -303,7 +336,9 @@ async function flushSpreadsheet(spreadsheet: SpreadsheetEmulator): Promise<void>
   const dirtySheets = spreadsheet.getAllSheets().filter((sheet) => sheet.isDirty());
 
   for (const sheet of dirtySheets) {
-    await client.clearAndWriteSheet(sheet.getName(), sheet.toWritableValues());
+    await client.applyOperations(sheet.getName(), sheet.getOperations());
+    sheet.clearOperations();
+    sheet.clearDirty();
     sheet.clearCreatedFlag();
   }
 }
@@ -421,8 +456,15 @@ export async function callSocialProcessRequest(action: string, data: unknown): P
 }
 
 export async function callLegacyMethod(method: string, ...args: unknown[]): Promise<unknown> {
-  const readOnly = method === "getAvailabilityData";
-  const requiredSheets = readOnly ? [SHEETS.VISITORS, SHEETS.ROOMS, SHEETS.SUBS] : undefined;
+  const readOnly = method === "getAvailabilityData" || method === "getBootData" || method === "getSecondaryData";
+  let requiredSheets: string[] | undefined;
+  if (method === "getAvailabilityData") {
+    requiredSheets = [SHEETS.VISITORS, SHEETS.ROOMS, SHEETS.SUBS];
+  } else if (method === "getBootData") {
+    requiredSheets = [SHEETS.VISITORS, SHEETS.SUBS, SHEETS.TAMKEEN, SHEETS.ROOMS];
+  } else if (method === "getSecondaryData") {
+    requiredSheets = [SHEETS.SUBS, SHEETS.TAMKEEN];
+  }
   return runLegacy((ctx) => {
     const fn = ensureFunction(ctx, method);
     return fn(...args);
