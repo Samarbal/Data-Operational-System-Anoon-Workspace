@@ -199,7 +199,7 @@ function createScriptCache(): ScriptCache {
   };
 }
 
-const LEGACY_DIR = path.join(process.cwd(), "operational data sys");
+const LEGACY_DIR = path.join(process.cwd(), "v3 - Operational data system");
 const CODE_PATH = path.join(LEGACY_DIR, "Code.gs.txt");
 const AUTH_PATH = path.join(LEGACY_DIR, "Auth_Code.gs.txt");
 
@@ -392,6 +392,11 @@ export async function callProcessRequest(action: string, data: unknown): Promise
     "updateTamkeenAttendance",
     "freezeTamkeenTime",
     "unfreezeTamkeenTime",
+    "deleteVisitor",
+    "addSnackToVisitor",
+    "addSnackToSubscription",
+    "addSnackToTamkeen",
+    "payTamkeenSnack",
     "social_checkin",
     "social_addFuture",
     "social_addBooking"

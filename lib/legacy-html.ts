@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const LEGACY_DIR = path.join(process.cwd(), "operational data sys");
+const LEGACY_DIR = path.join(process.cwd(), "v3 - Operational data system");
 
 const BRIDGE_SCRIPT = `<script id="space-noon-bridge">
 (function () {

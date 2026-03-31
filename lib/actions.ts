@@ -17,6 +17,9 @@ export const MUTATING_ACTIONS = new Set<string>([
   "freezeTime",
   "unfreezeTime",
   "updatePayment",
+  "deleteVisitor",
+  "addSnackToVisitor",
+  "addSnackToSubscription",
   "addFutureBooking",
   "checkinFromFuture",
   "cancelFutureBooking",
@@ -36,6 +39,8 @@ export const MUTATING_ACTIONS = new Set<string>([
   "updateTamkeenAttendance",
   "freezeTamkeenTime",
   "unfreezeTamkeenTime",
+  "addSnackToTamkeen",
+  "payTamkeenSnack",
   "social_checkin",
   "social_addFuture",
   "social_addBooking"
