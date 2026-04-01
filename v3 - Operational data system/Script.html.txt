@@ -6,6 +6,8 @@ var APP = {
   visitors:[], subscriptions:[], hallBookings:[], tamkeen:[], opts:{},
   today:'', todayDay:'', dashData:{},
   dashPeriod:'today',
+  dashReqId:0, dashLoading:false, dashQueuedPeriod:null,
+  filtersInited:false, subsPulseTimer:null,
   vDateFilter:'today', vStatusFilter:'all',
   swFilter:'all', smFilter:'all',
   hallPeriod:'today', hallRoom:'all', hallPaid:'all',
@@ -22,6 +24,12 @@ var APP = {
 function boot() {
   var ov=document.getElementById('login-overlay');
   if(ov && ov.style.display!=='none') return;
+  setTbodyLoading('visitors-tbody',11,'جاري تحميل جدول الاستقبال...');
+  setTbodyLoading('dash-visits-tbody',8,'جاري تحميل زيارات اليوم...');
+  setTbodyLoading('dash-unpaid-tbody',9,'جاري تحميل غير المحصّل...');
+  setTbodyLoading('weekly-tbody',13,'جاري تحميل الاشتراكات...');
+  setTbodyLoading('monthly-tbody',13,'جاري تحميل الاشتراكات...');
+  setTbodyLoading('tamkeen-tbody',9,'جاري تحميل تمكين...');
   google.script.run
     .withSuccessHandler(function(d) {
       try{
@@ -29,11 +37,10 @@ function boot() {
         APP.subscriptions = [];
         APP.tamkeen       = [];
         APP.opts          = (d&&d.opts) || {};
-        APP.today         = (d&&d.today) || '';
+        APP.today         = normalizeToDMY((d&&d.today) || '');
         APP.todayDay      = (d&&d.todayDay) || '';
         APP.dashData      = (d&&d.dashboard) || {};
         populateDropdowns();
-        initAllFilters();
         renderDashboard();
         renderVisitors();
         renderWeeklySubs();
@@ -95,19 +102,26 @@ function fillSel(id, items, empty) {
   items.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;el.appendChild(o);});
 }
 function populateDropdowns() {
-  var o=APP.opts;
-  var pipelines=(o.PIPELINES||[]).slice();
-  if(pipelines.indexOf('دورة')===-1) pipelines.push('دورة');
-  var hdTypes=['ساعات','يومي'];
-  fillSel('ci-subtype',hdTypes,true); fillSel('ci-pipeline',pipelines,true);
-  fillSel('co-paytype',o.PAY_TYPES||[],true); fillSel('co-account',o.ACCOUNTS||[],true);
-  fillSel('ev-subtype',hdTypes,true); fillSel('ev-pipeline',pipelines,true);
-  fillSel('ev-paytype',o.PAY_TYPES||[],true); fillSel('ev-account',o.ACCOUNTS||[],true);
-  fillSel('as-pipeline',pipelines,true); fillSel('as-paytype',o.PAY_TYPES||[],true); fillSel('as-account',o.ACCOUNTS||[],true);
-  fillSel('es-pipeline',pipelines,true); fillSel('es-paytype',o.PAY_TYPES||[],true); fillSel('es-account',o.ACCOUNTS||[],true);
-  fillSel('hb-pipeline',pipelines,true); fillSel('hb-paytype',o.PAY_TYPES||[],true);
-  fillSel('eh-pipeline',pipelines,true); fillSel('eh-paytype',o.PAY_TYPES||[],true);
-  fillSel('rn-new-pipeline',pipelines,true); fillSel('rn-new-paytype',o.PAY_TYPES||[],true);
+  var o = APP.opts;
+  var pipelines = (o.PIPELINES || []).slice();
+  var requiredPipelines = ['دورة', 'برنامج تمكين', 'صديق', 'سوشيال ميديا', 'اعلان'];
+  requiredPipelines.forEach(function(p) {
+    if (pipelines.indexOf(p) === -1) pipelines.push(p);
+  });
+  // Keep backward compatibility values in the pipeline list
+  ['وسائل التواصل الاجتماعي','برنامج تمكين إنسان','معرفة شخصية'].forEach(function(p){
+    if(pipelines.indexOf(p)===-1) pipelines.push(p);
+  });
+  var hdTypes = ['ساعات', 'يومي'];
+  fillSel('ci-subtype', hdTypes, true); fillSel('ci-pipeline', pipelines, true);
+  fillSel('co-paytype', o.PAY_TYPES || [], true); fillSel('co-account', o.ACCOUNTS || [], true);
+  fillSel('ev-subtype', hdTypes, true); fillSel('ev-pipeline', pipelines, true);
+  fillSel('ev-paytype', o.PAY_TYPES || [], true); fillSel('ev-account', o.ACCOUNTS || [], true);
+  fillSel('as-pipeline', pipelines, true); fillSel('as-paytype', o.PAY_TYPES || [], true); fillSel('as-account', o.ACCOUNTS || [], true);
+  fillSel('es-pipeline', pipelines, true); fillSel('es-paytype', o.PAY_TYPES || [], true); fillSel('es-account', o.ACCOUNTS || [], true);
+  fillSel('hb-pipeline', pipelines, true); fillSel('hb-paytype', o.PAY_TYPES || [], true);
+  fillSel('eh-pipeline', pipelines, true); fillSel('eh-paytype', o.PAY_TYPES || [], true);
+  fillSel('rn-new-pipeline', pipelines, true); fillSel('rn-new-paytype', o.PAY_TYPES || [], true);
 }
 
 // ================================================================
@@ -131,6 +145,18 @@ function nowTime(){var n=new Date();return pad2(n.getHours())+':'+pad2(n.getMinu
 function nowDate(){var n=new Date();return pad2(n.getDate())+'-'+pad2(n.getMonth()+1)+'-'+n.getFullYear();}
 function toYMD(dmy){if(!dmy)return'';var p=dmy.split('-');return p[2]+'-'+p[1]+'-'+p[0];}
 function toDMY(ymd){if(!ymd)return'';var p=ymd.split('-');return p[2]+'-'+p[1]+'-'+p[0];}
+function normalizeToDMY(d){
+  if(!d)return'';
+  if(d.length===10&&d[2]==='-')return d; // DD-MM-YYYY
+  if(d.length===10&&d[4]==='-')return toDMY(d); // YYYY-MM-DD
+  return d;
+}
+
+function setTbodyLoading(tbodyId, colspan, msg){
+  var tb=document.getElementById(tbodyId);
+  if(!tb) return;
+  tb.innerHTML='<tr><td colspan="'+(colspan||1)+'" class="empty-state">'+(msg||'جاري التحميل...')+'</td></tr>';
+}
 
 function normSubType(v){
   var s=String(v||'').replace(/[\u200e\u200f\u061c]/g,'').trim();
@@ -179,7 +205,7 @@ function findActiveSubVisitor(sub){
   var ids=sub.visitIds.split(',').map(function(x){return+x.trim();}).filter(Boolean);
   for(var i=ids.length-1;i>=0;i--){
     var v=findVisitor(ids[i]);
-    if(v&&v.entryDate===APP.today&&!v.exitTime)return v;
+    if(v&&normalizeToDMY(v.entryDate||v.date)===normalizeToDMY(APP.today)&&!v.exitTime)return v;
   }
   return null;
 }
@@ -310,38 +336,72 @@ function initInlinePaymentModal(){
 }
 
 function loadDashboard(period){
-  APP.dashPeriod=period||APP.dashPeriod||'today';
+  var requestedPeriod=period||APP.dashPeriod||'today';
+  APP.dashPeriod=requestedPeriod;
+  if(APP.dashLoading){
+    APP.dashQueuedPeriod = requestedPeriod;
+    return;
+  }
+  APP.dashLoading = true;
+  APP.dashReqId += 1;
+  var reqId = APP.dashReqId;
+  var inFlightPeriod = APP.dashPeriod;
+  setTbodyLoading('dash-visits-tbody',8,'جاري تحميل زيارات اليوم...');
+  setTbodyLoading('dash-unpaid-tbody',9,'جاري تحميل غير المحصّل...');
   google.script.run
-    .withSuccessHandler(function(d){APP.dashData=d||{};renderDashboard();})
-    .withFailureHandler(function(e){showToast('فشل تحميل الإحصاء: '+e.message,'error');})
-    .processRequest('getDashboard',{period:APP.dashPeriod});
+    .withSuccessHandler(function(d){
+      if(reqId !== APP.dashReqId) return;
+      APP.dashData=d||{};
+      renderDashboard();
+      APP.dashLoading = false;
+      if(APP.dashQueuedPeriod){
+        var next = APP.dashQueuedPeriod;
+        APP.dashQueuedPeriod = null;
+        if(next !== inFlightPeriod){
+          loadDashboard(next);
+        }
+      }
+    })
+    .withFailureHandler(function(e){
+      if(reqId !== APP.dashReqId) return;
+      APP.dashLoading = false;
+      showToast('فشل تحميل الإحصاء: '+e.message,'error');
+      if(APP.dashQueuedPeriod){
+        var next = APP.dashQueuedPeriod;
+        APP.dashQueuedPeriod = null;
+        if(next !== inFlightPeriod) loadDashboard(next);
+      }
+    })
+    .processRequest('getDashboard',{range:APP.dashPeriod,period:APP.dashPeriod,limitVisits:30,limitUnpaid:200});
 }
 function silentRefresh(){
   google.script.run
     .withSuccessHandler(function(d){
       APP.visitors = d.visitors || [];
       APP.dashData = d.dashboard || {};
-      APP.today         = d.today || APP.today;
+      APP.today = normalizeToDMY(d.today || APP.today);
 
-      renderDashboard();
-      renderVisitors();
-      renderVKPIs();
-      if(document.getElementById('pg-rooms').classList.contains('active')) loadAndRenderHalls();
-      loadFutureBookings();
-      var activePage=((document.querySelector('.page.active')||{}).id||'').toLowerCase();
-      var needSecondary=activePage.indexOf('sub')!==-1||activePage.indexOf('tamkeen')!==-1;
-      if(needSecondary){
-        google.script.run
-          .withSuccessHandler(function(sec){
-            APP.subscriptions = sec.subscriptions || [];
-            APP.tamkeen = sec.tamkeen || [];
-            renderWeeklySubs();
-            renderMonthlySubs();
-            renderTamkeen();
-          })
-          .withFailureHandler(function(){})
-          .getSecondaryData();
-      }
+      setTimeout(function(){
+        renderDashboard();
+        renderVisitors();
+        renderVKPIs();
+        if(document.getElementById('pg-rooms').classList.contains('active')) loadAndRenderHalls();
+        loadFutureBookings();
+        var activePage=((document.querySelector('.page.active')||{}).id||'').toLowerCase();
+        var needSecondary=activePage.indexOf('sub')!==-1||activePage.indexOf('tamkeen')!==-1;
+        if(needSecondary){
+          google.script.run
+            .withSuccessHandler(function(sec){
+              APP.subscriptions = sec.subscriptions || [];
+              APP.tamkeen = sec.tamkeen || [];
+              renderWeeklySubs();
+              renderMonthlySubs();
+              renderTamkeen();
+            })
+            .withFailureHandler(function(){})
+            .getSecondaryData();
+        }
+      },0);
     })
     .withFailureHandler(function(){})
     .getBootData();
@@ -355,7 +415,7 @@ setInterval(function(){
 // VISITOR KPIs
 // ================================================================
 function renderVKPIs(){
-  var tv=APP.visitors.filter(function(v){return (v.entryDate||v.date)===APP.today;});
+  var tv=APP.visitors.filter(function(v){return normalizeToDMY(v.entryDate||v.date)===APP.today;});
   var active=0,mins=0,newV=0;
   tv.forEach(function(v){
     if(!v.exitTime)active++;
@@ -375,11 +435,14 @@ function renderVKPIs(){
 function renderVisitors(){
   renderVKPIs();
   var search=((document.getElementById('v-search')||{}).value||'').trim().toLowerCase();
-  var today=APP.today;
+  var today=normalizeToDMY(APP.today);
   var list=APP.visitors.filter(function(v){
     if(v.subType!=='ساعات'&&v.subType!=='يومي')return false;
-    var vDate=v.entryDate||v.date||'';
-    if(APP.vDateFilter==='today'&&vDate!==today)return false;
+    var vDate=normalizeToDMY(v.entryDate||v.date||'');
+    if(!vDate && v.entryDate){vDate=normalizeToDMY(v.entryDate);} // fallback for missing date shape
+    if(APP.vDateFilter==='today' && today){
+      if(vDate!==today) return false;
+    }
     if(APP.vDateFilter==='week'){
       if(!vDate)return false;
       var d=new Date(); d.setHours(0,0,0,0);
@@ -501,6 +564,8 @@ function directSubCheckout(visRow,subRow,btn){
 // ALL FILTER INITS
 // ================================================================
 function initAllFilters(){
+  if(APP.filtersInited) return;
+  APP.filtersInited = true;
   document.querySelectorAll('.dash-period').forEach(function(b){b.addEventListener('click',function(){setAF('.dash-period',b);loadDashboard(b.dataset.period);});});
   document.querySelectorAll('.v-filter-date').forEach(function(b){b.addEventListener('click',function(){APP.vDateFilter=b.dataset.filter;setAF('.v-filter-date',b);renderVisitors();});});
   document.querySelectorAll('.v-filter-status').forEach(function(b){b.addEventListener('click',function(){APP.vStatusFilter=b.dataset.status;setAF('.v-filter-status',b);renderVisitors();});});
@@ -514,7 +579,7 @@ function initAllFilters(){
   document.querySelectorAll('.hall-paid').forEach(function(b){b.addEventListener('click',function(){APP.hallPaid=b.dataset.paid;setAF('.hall-paid',b);renderHalls();});});
   document.querySelectorAll('.t-group').forEach(function(b){b.addEventListener('click',function(){APP.tkGroup=b.dataset.g;document.querySelectorAll('.t-group').forEach(function(x){x.classList.remove('active-filter');});b.classList.add('active-filter');renderTamkeen();});});
   var ts=document.getElementById('t-search');if(ts)ts.oninput=renderTamkeen;
-  setInterval(function(){
+  APP.subsPulseTimer = setInterval(function(){
     var hasActive=APP.subscriptions.some(function(s){return findActiveSubVisitor(s);});
     if(hasActive){renderWeeklySubs();renderMonthlySubs();}
   },30000);
@@ -554,9 +619,10 @@ function initCheckinModal(){
     ['ci-name','ci-phone','ci-notes'].forEach(function(id){document.getElementById(id).value='';});
     document.getElementById('ci-banner').style.display='none';
     setSel('ci-subtype','ساعات'); setSel('ci-pipeline','');
-    if(APP.today){var dp=APP.today.split('-');document.getElementById('ci-date').value=dp[2]+'-'+dp[1]+'-'+dp[0];}
-    var n=new Date();document.getElementById('ci-time').value=pad2(n.getHours())+':'+pad2(n.getMinutes());
-    openModal('modal-checkin');document.getElementById('ci-name').focus();
+    var ciToday = APP.today ? APP.today.split('-').reverse().join('-') : new Date().toISOString().split('T')[0];
+    document.getElementById('ci-date').value = ciToday;
+    var n = new Date(); document.getElementById('ci-time').value = pad2(n.getHours())+':'+pad2(n.getMinutes());
+    openModal('modal-checkin'); document.getElementById('ci-name').focus();
   });
   var lt=null;
   document.getElementById('ci-name').addEventListener('input',function(){
@@ -765,7 +831,8 @@ function initAddSubModal(){
     document.getElementById('as-expiry').value='';document.getElementById('as-paid').checked=false;
     setSel('as-subtype','');setSel('as-pipeline','');setSel('as-paytype','');setSel('as-account','');
     toggleAcct('as-paytype','as-account-group');
-    if(APP.today){var dp=APP.today.split('-');document.getElementById('as-start').value=dp[2]+'-'+dp[1]+'-'+dp[0];}
+    var asToday = APP.today ? APP.today.split('-').reverse().join('-') : new Date().toISOString().split('T')[0];
+    document.getElementById('as-start').value = asToday;
     document.getElementById('as-banner').style.display='none';
     openModal('modal-add-sub');document.getElementById('as-name').focus();
   });
@@ -831,7 +898,8 @@ function openRenewSub(ri){
   document.getElementById('rn-expiry').textContent=sub.expiryDate||'—';document.getElementById('rn-visits').textContent=sub.visitsCount||0;
   document.getElementById('rn-hours').textContent=(sub.totalHours||0)+'س';
   document.getElementById('rn-new-name').value=sub.name;document.getElementById('rn-new-phone').value=sub.phone;
-  if(APP.today){var dp=APP.today.split('-');document.getElementById('rn-new-start').value=dp[2]+'-'+dp[1]+'-'+dp[0];}
+  var rnToday = APP.today ? APP.today.split('-').reverse().join('-') : new Date().toISOString().split('T')[0];
+  document.getElementById('rn-new-start').value=rnToday;
   document.getElementById('rn-new-validity').value='';document.getElementById('rn-new-expiry-out').value='';
   document.getElementById('rn-new-cost').value='';document.getElementById('rn-new-paid').checked=false;
   setSel('rn-new-subtype',sub.subType);setSel('rn-new-pipeline',sub.pipeline||'');setSel('rn-new-paytype','');
@@ -862,6 +930,30 @@ function initSubCheckinModal(){
             ?subInApp.visitIds+','+res.visitorRowIndex
             :String(res.visitorRowIndex);
           subInApp.visitIds=ids;
+        }
+
+        // تحديث فوري للواجهة (Optimistic) قبل الـ refresh الكامل.
+        if(res.visitorRowIndex){
+          APP.visitors = APP.visitors || [];
+          APP.visitors.unshift({
+            rowIndex: res.visitorRowIndex,
+            name: sub.name,
+            phone: sub.phone,
+            entryDate: res.entryDate || APP.today,
+            entryTime: res.entryTime || nowTime(),
+            exitTime: '',
+            duration: '',
+            durationH: 0,
+            subType: sub.subType,
+            pipeline: sub.pipeline || '',
+            paid: 'نعم',
+            amountPaid: 0,
+            amountRemaining: 0
+          });
+          renderWeeklySubs();
+          renderMonthlySubs();
+          renderVisitors();
+          renderVKPIs();
         }
 
         showToast('تم تسجيل دخول '+sub.name+' ✓','success');
@@ -919,7 +1011,7 @@ function openEditSub(ri){
   _esRem();if(esAP)esAP.oninput=_esRem;
   var esCostInp=document.getElementById('es-cost');if(esCostInp)esCostInp.oninput=_esRem;
   var activeV=findActiveSubVisitor(s),todayV=null;
-  if(!activeV&&s.visitIds){var ids=s.visitIds.split(',').map(function(x){return+x.trim();}).filter(Boolean);for(var i=ids.length-1;i>=0;i--){var v=findVisitor(ids[i]);if(v&&v.entryDate===APP.today){todayV=v;break;}}}
+  if(!activeV&&s.visitIds){var ids=s.visitIds.split(',').map(function(x){return+x.trim();}).filter(Boolean);for(var i=ids.length-1;i>=0;i--){var v=findVisitor(ids[i]);if(v&&normalizeToDMY(v.entryDate||v.date)===normalizeToDMY(APP.today)){todayV=v;break;}}}
   var visForTime=activeV||todayV;
   var timeSection=document.getElementById('es-time-section');
   if(visForTime){timeSection.style.display='';document.getElementById('es-entry-time').value=visForTime.entryTime?visForTime.entryTime.slice(0,5):'';document.getElementById('es-exit-time').value=visForTime.exitTime?visForTime.exitTime.slice(0,5):'';timeSection.dataset.visRow=visForTime.rowIndex;updateEsCalcDur();}
@@ -1646,19 +1738,63 @@ function initSnackModal(){
     if(APP._snackSubRow){
       // اشتراك — نضيف للتكلفة
       var sub = findSub(APP._snackSubRow);
+      var vis = findVisitor(APP._snackRow);
       var amtPaid = parseFloat(sub ? sub.amountPaid : 0) || 0;
+      
+      // تحديث محلي فوري (Optimistic Update)
+      if(sub) {
+        sub.cost = (parseFloat(sub.cost) || 0) + adding;
+        sub.amountRemaining = Math.max(0, sub.cost - amtPaid);
+      }
+      if(vis) {
+        vis.cost = (parseFloat(vis.cost) || 0) + adding;
+        vis.amountRemaining = Math.max(0, vis.cost - (parseFloat(vis.amountPaid) || 0));
+        vis.snack = (parseFloat(vis.snack) || 0) + adding;
+      }
       
       google.script.run
         .withSuccessHandler(function(res){
           btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
-          if(!res.success){ showToast(res.error,'error'); return; }
+          if(!res.success){ 
+            // تراجع عن التحديث المحلي في حالة الخطأ
+            if(sub) {
+              sub.cost = (parseFloat(sub.cost) || 0) - adding;
+              sub.amountRemaining = Math.max(0, sub.cost - amtPaid);
+            }
+            if(vis) {
+              vis.cost = (parseFloat(vis.cost) || 0) - adding;
+              vis.amountRemaining = Math.max(0, vis.cost - (parseFloat(vis.amountPaid) || 0));
+              vis.snack = (parseFloat(vis.snack) || 0) - adding;
+            }
+            showToast(res.error,'error'); 
+            return; 
+          }
+          // تثبيت التحديث الفوري من البيانات المرجعة
+          if(res.visitorCost !== undefined && vis) vis.cost = res.visitorCost;
+          if(res.visitorAmountRemaining !== undefined && vis) vis.amountRemaining = res.visitorAmountRemaining;
+          if(res.newCost !== undefined && sub) sub.cost = res.newCost;
+          if(res.amountRemaining !== undefined && sub) sub.amountRemaining = res.amountRemaining;
+          
           closeModal('modal-snack');
-          silentRefresh();
+          renderVisitors();
+          renderSubTable('ساعات',APP.shFilter,(document.getElementById('sh-search')||{}).value,'hourly-tbody');
+          renderWeeklySubs();
+          renderMonthlySubs();
           showToast('تمت إضافة سناك ₪'+adding+' للاشتراك ✓','success');
           if(res.amountRemaining > 0) showToast('غير محصّل: ₪'+res.amountRemaining.toFixed(2),'warn');
         })
         .withFailureHandler(function(e){
           btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
+          // تراجع عن التحديث المحلي في حالة الخطأ
+          if(sub) {
+            sub.cost = (parseFloat(sub.cost) || 0) - adding;
+            sub.amountRemaining = Math.max(0, sub.cost - amtPaid);
+          }
+          if(vis) {
+            vis.cost = (parseFloat(vis.cost) || 0) - adding;
+            vis.amountRemaining = Math.max(0, vis.cost - (parseFloat(vis.amountPaid) || 0));
+            vis.snack = (parseFloat(vis.snack) || 0) - adding;
+          }
           showToast('خطأ: '+e.message,'error');
         })
         .processRequest('addSnackToSubscription',{
@@ -1670,19 +1806,45 @@ function initSnackModal(){
 
     } else {
       // فريلانسر — عمود SNACK المنفصل
+      var v = findVisitor(APP._snackRow);
+      
+      // تحديث محلي فوري (Optimistic Update)
+      if(v) {
+        v.snack = (parseFloat(v.snack) || 0) + adding;
+        v.cost = (parseFloat(v.cost) || 0) + adding;
+        v.amountRemaining = Math.max(0, v.cost - (parseFloat(v.amountPaid) || 0));
+      }
+      
       google.script.run
         .withSuccessHandler(function(res){
           btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
-          if(!res.success){ showToast(res.error,'error'); return; }
-          // تحديث محلي فوري
-          var v = findVisitor(APP._snackRow);
-          if(v) v.snack = res.snack;
+          if(!res.success){ 
+            // تراجع عن التحديث المحلي
+            if(v) {
+              v.snack = (parseFloat(v.snack) || 0) - adding;
+              v.cost = (parseFloat(v.cost) || 0) - adding;
+              v.amountRemaining = Math.max(0, v.cost - (parseFloat(v.amountPaid) || 0));
+            }
+            showToast(res.error,'error'); 
+            return; 
+          }
+          // تثبيت التحديث من البيانات المرجعة
+          if(res.snack !== undefined && v) v.snack = res.snack;
+          if(res.cost !== undefined && v) v.cost = res.cost;
+          if(res.amountRemaining !== undefined && v) v.amountRemaining = res.amountRemaining;
+          
           closeModal('modal-snack');
-          silentRefresh();
+          renderVisitors();
           showToast('تمت إضافة سناك ₪'+adding+' ✓','success');
         })
         .withFailureHandler(function(e){
           btn.disabled = false; btn.textContent = 'إضافة للحساب ✓';
+          // تراجع عن التحديث المحلي
+          if(v) {
+            v.snack = (parseFloat(v.snack) || 0) - adding;
+            v.cost = (parseFloat(v.cost) || 0) - adding;
+            v.amountRemaining = Math.max(0, v.cost - (parseFloat(v.amountPaid) || 0));
+          }
           showToast('خطأ: '+e.message,'error');
         })
         .processRequest('addSnackToVisitor',{

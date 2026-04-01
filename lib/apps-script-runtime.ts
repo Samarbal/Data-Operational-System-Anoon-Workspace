@@ -199,6 +199,10 @@ class SpreadsheetEmulator {
     return this.sheets.get(name) ?? null;
   }
 
+  getSheets(): SheetEmulator[] {
+    return this.getAllSheets();
+  }
+
   insertSheet(name: string): SheetEmulator {
     const existing = this.sheets.get(name);
     if (existing) return existing;

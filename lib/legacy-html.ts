@@ -7,6 +7,37 @@ const BRIDGE_SCRIPT = `<script id="space-noon-bridge">
 (function () {
   if (window.google && window.google.script && window.google.script.run) return;
 
+  var __spaceNoonCache = {
+    store: {},
+    inflight: {},
+    ttlMs: 15000
+  };
+
+  function cacheKey(url, body) {
+    try { return url + '|' + JSON.stringify(body || {}); } catch (e) { return url; }
+  }
+
+  function isReadHeavy(url, body) {
+    if (!url) return false;
+    if (url.indexOf('/api/') !== 0) return false;
+    var action = url.slice('/api/'.length);
+    // mirror READ_HEAVY_ACTIONS on the server side
+    var heavy = {
+      getInitialData: true,
+      getDashboard: true,
+      getHallBookings: true,
+      getFutureBookings: true,
+      getFutureHallBookings: true,
+      getVisitors: true,
+      getSubs: true,
+      getTamkeen: true,
+      getArchive: true,
+      getBootData: true,
+      getSecondaryData: true
+    };
+    return !!heavy[action];
+  }
+
   function parseResponse(response) {
     var ct = response.headers.get('content-type') || '';
     if (ct.indexOf('application/json') !== -1) return response.json();
@@ -49,11 +80,36 @@ const BRIDGE_SCRIPT = `<script id="space-noon-bridge">
 
     function invoke(method, args) {
       var mapped = mapMethod(method, args);
-      fetch(mapped.url, {
+      var body = mapped.body || {};
+      var useCache = isReadHeavy(mapped.url, body);
+      var key = useCache ? cacheKey(mapped.url, body) : null;
+
+      if (useCache && key) {
+        var now = Date.now();
+        var hit = __spaceNoonCache.store[key];
+        if (hit && (now - hit.ts) < __spaceNoonCache.ttlMs) {
+          Promise.resolve(hit.payload).then(function (payload) {
+            if (typeof successHandler === 'function') successHandler(payload);
+          });
+          return;
+        }
+        if (__spaceNoonCache.inflight[key]) {
+          __spaceNoonCache.inflight[key].then(function (payload) {
+            if (typeof successHandler === 'function') successHandler(payload);
+          })['catch'](function (error) {
+            if (typeof failureHandler === 'function') {
+              failureHandler({ message: error && error.message ? error.message : String(error) });
+            }
+          });
+          return;
+        }
+      }
+
+      var p = fetch(mapped.url, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mapped.body || {})
+        body: JSON.stringify(body)
       })
         .then(function (response) {
           return parseResponse(response).then(function (payload) {
@@ -65,7 +121,11 @@ const BRIDGE_SCRIPT = `<script id="space-noon-bridge">
           });
         })
         .then(function (payload) {
+          if (useCache && key) {
+            __spaceNoonCache.store[key] = { ts: Date.now(), payload: payload };
+          }
           if (typeof successHandler === 'function') successHandler(payload);
+          return payload;
         })
         .catch(function (error) {
           if (typeof failureHandler === 'function') {
@@ -73,7 +133,13 @@ const BRIDGE_SCRIPT = `<script id="space-noon-bridge">
           } else {
             console.error(error);
           }
+          throw error;
         });
+
+      if (useCache && key) {
+        __spaceNoonCache.inflight[key] = p;
+        p['finally'](function () { delete __spaceNoonCache.inflight[key]; });
+      }
     }
 
     var methods = [
@@ -87,7 +153,9 @@ const BRIDGE_SCRIPT = `<script id="space-noon-bridge">
       'getAvailabilityData',
       'getInitialData',
       'getDashboard',
-      'getHallBookings'
+      'getHallBookings',
+      'getBootData',
+      'getSecondaryData'
     ];
 
     methods.forEach(function (method) {

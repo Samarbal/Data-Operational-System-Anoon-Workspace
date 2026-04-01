@@ -236,7 +236,24 @@ function fmtD(d)   { return p2(d.getDate())+'-'+p2(d.getMonth()+1)+'-'+d.getFull
 function fmtT(d)   { return p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds()); }
 function dayName(d){ return ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'][d.getDay()]; }
 function now()     { var n=new Date(); return {n:n,date:fmtD(n),time:fmtT(n),day:dayName(n)}; }
-function toD(v)    { if(!v)return''; if(v instanceof Date)return fmtD(v); return String(v).trim(); }
+function toD(v){
+  if(!v) return '';
+  if(v instanceof Date) return fmtD(v);
+  var s = String(v).trim();
+  if(!s) return '';
+  s = s.replace(/\//g,'-');
+  var m;
+  // YYYY-MM-DD -> DD-MM-YYYY
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return p2(+m[3])+'-'+p2(+m[2])+'-'+m[1];
+  // DD-MM-YYYY
+  m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if(m) return p2(+m[1])+'-'+p2(+m[2])+'-'+m[3];
+  // Fallback: try Date parser for serialized values.
+  var d = new Date(s);
+  if(!isNaN(d.getTime())) return fmtD(d);
+  return s;
+}
 function toT(v)    { if(!v)return''; if(v instanceof Date)return fmtT(v); return String(v).trim(); }
 function ymdToDmy(s){ if(!s)return''; var p=s.split('-'); return p[2]+'-'+p[1]+'-'+p[0]; }
 
@@ -630,7 +647,7 @@ function addSnackToSubscription(data){
   var adding = parseFloat(data.amount)||0;
   if(adding<=0) return{success:false,error:'المبلغ يجب أن يكون أكبر من صفر'};
 
-  // ── 1. حدّث SNACK في سجل الزوار ──────────────────────────
+  // ── 1. حدّث SNACK و COST و AMT_REM في سجل الزوار ──────────────────────────
   var vs = sheet(SHEET_NAMES.VISITORS);
   var vri = parseInt(data.visitorRowIndex);
   var vrow = vs.getRange(vri,1,1,VC).getValues()[0];
@@ -640,6 +657,17 @@ function addSnackToSubscription(data){
   var currentSnack = parseFloat(vrow[V.SNACK-1])||0;
   var newSnack     = currentSnack + adding;
   vrow[V.SNACK-1]  = newSnack;
+
+  // تحديث COST (أساسي + سناك جديد)
+  var currentCost = parseFloat(vrow[V.COST-1])||0;
+  var newVisitorCost = currentCost + adding;
+  vrow[V.COST-1] = newVisitorCost;
+
+  // تحديث AMT_REM في سجل الزوار
+  var vAmtPaid = parseFloat(vrow[V.AMT_PAID-1])||0;
+  var vNewRem = Math.max(0, newVisitorCost - vAmtPaid);
+  vrow[V.AMT_REM-1] = vNewRem;
+  vrow[V.PAID-1] = vNewRem<=0&&newVisitorCost>0?'نعم':'لا';
 
   var noteText = data.note ? ('سناك: '+data.note+' ₪'+adding) : ('سناك: ₪'+adding);
   var existingNotes = String(vrow[V.NOTES-1]||'').trim();
@@ -668,7 +696,7 @@ function addSnackToSubscription(data){
   writeRow(ss, sri, srow);
   invS();
 
-  return{success:true, snack:newSnack, newCost:newCost, amountRemaining:newRem};
+  return{success:true, snack:newSnack, visitorCost:newVisitorCost, visitorAmountRemaining:vNewRem, newCost:newCost, amountRemaining:newRem};
 }
 
 // ─── Time Freeze — Visitors ────────────────────────────────────
@@ -1077,7 +1105,7 @@ function subCheckin(data){
   var isExp = expiry ? cmpDMY(today, expiry) > 0 : false;
   var name = String(srow[S.NAME-1] || '').trim();
   var phone = String(srow[S.PHONE-1] || '').trim();
-  var subType=cleanSubType(srow[S.TYPE-1]), pipeline=String(srow[S.PIPE-1]||'');
+  var subType = cleanSubType(srow[S.TYPE-1] || '');
   var pipeline = String(srow[S.PIPE-1] || '');
 
   if(isExp){
@@ -1135,6 +1163,7 @@ function subCheckin(data){
   srow[S.VISITS-1] = cnt;
   srow[S.LAST_V-1] = t.date;
   srow[S.VIS_IDS-1] = ids;
+  srow[S.STATUS-1] = 'نشط';
   writeRow(ss, si, srow);
 
   invV();
@@ -1288,6 +1317,12 @@ function getDashboardDataFromPrefetched(prefetched){
   var cached = _gc(ck);
   if(cached) return cached;
 
+  var opts = prefetched.options || {};
+  var limitVisits = (opts && opts.limitVisits != null) ? parseInt(opts.limitVisits, 10) : 30;
+  if(isNaN(limitVisits) || limitVisits < 0) limitVisits = 30;
+  var limitUnpaid = (opts && opts.limitUnpaid != null) ? parseInt(opts.limitUnpaid, 10) : 200;
+  if(isNaN(limitUnpaid) || limitUnpaid < 0) limitUnpaid = 200;
+
   var allV = prefetched.visitors || [];
   var allS = prefetched.subscriptions || [];
   var allT = prefetched.tamkeen || [];
@@ -1296,10 +1331,13 @@ function getDashboardDataFromPrefetched(prefetched){
   var todayStr = fmtD(new Date());
   var todayD = new Date();
   todayD.setHours(0,0,0,0);
+  var monthStartD = new Date(todayD.getFullYear(), todayD.getMonth(), 1);
+  monthStartD.setHours(0,0,0,0);
 
   function inP(ds){
-    if(!ds) return false;
-    var pts = ds.split('-');
+    var dmy = toD(ds);
+    if(!dmy) return false;
+    var pts = dmy.split('-');
     if(pts.length < 3) return false;
     var d = new Date(+pts[2],+pts[1]-1,+pts[0]);
     d.setHours(0,0,0,0);
@@ -1309,14 +1347,15 @@ function getDashboardDataFromPrefetched(prefetched){
       ws.setDate(todayD.getDate()-6);
       return d >= ws && d <= todayD;
     }
-    if(p === 'month') return d.getMonth() === todayD.getMonth() && d.getFullYear() === todayD.getFullYear();
+    // Month filter: from first day of current month until today.
+    if(p === 'month') return d >= monthStartD && d <= todayD;
     return false;
   }
 
   var todayAndPast = [];
   for(var i=0;i<allV.length;i++){
     var v = allV[i];
-    var d = v.date || v.entryDate || '';
+    var d = toD(v.date || v.entryDate || '');
     if(d && cmpDMY(d,todayStr) <= 0 && v.exitTime !== 'ملغي') todayAndPast.push(v);
   }
 
@@ -1328,7 +1367,7 @@ function getDashboardDataFromPrefetched(prefetched){
   var activeF = [];
   for(var k=0;k<allV.length;k++){
     var av = allV[k];
-    if((av.date || av.entryDate) === todayStr && !av.exitTime && av.pipeline !== 'برنامج تمكين إنسان'){
+    if(toD(av.date || av.entryDate) === todayStr && !av.exitTime && av.pipeline !== 'برنامج تمكين إنسان'){
       activeF.push(av);
     }
   }
@@ -1571,15 +1610,48 @@ function getDashboardDataFromPrefetched(prefetched){
     subsPending      : parseFloat(sPend.toFixed(2)),
     hallsCollected   : parseFloat(rColl.toFixed(2)),
     hallsPending     : parseFloat(rPend.toFixed(2)),
-    todayVisits      : allV.filter(function(v){ return (v.date || v.entryDate) === todayStr && v.exitTime !== 'ملغي'; }),
-    unpaidList: unpaidV.concat(unpaidR).concat(unpaidS).concat(unpaidTkSnack)
+    todayVisits      : (function(){
+      var rows = allV.filter(function(v){ return toD(v.date || v.entryDate) === todayStr && v.exitTime !== 'ملغي'; });
+      // Trim & pick only what the UI reads (keeps payload small).
+      if(limitVisits >= 0 && rows.length > limitVisits) rows = rows.slice(0, limitVisits);
+      return rows.map(function(v){
+        return {
+          name: v.name,
+          phone: v.phone,
+          pipeline: v.pipeline,
+          subType: v.subType,
+          entryDate: v.entryDate || v.date,
+          entryTime: v.entryTime || v.in,
+          exitTime: v.exitTime,
+          duration: v.duration,
+          cost: v.cost
+        };
+      });
+    })(),
+    unpaidList: (function(){
+      var rows = unpaidV.concat(unpaidR).concat(unpaidS).concat(unpaidTkSnack);
+      if(limitUnpaid >= 0 && rows.length > limitUnpaid) rows = rows.slice(0, limitUnpaid);
+      return rows.map(function(v){
+        return {
+          type: v.type,
+          rowIndex: v.rowIndex,
+          name: v.name,
+          phone: v.phone,
+          entryDate: v.entryDate || v.date,
+          subType: v.subType,
+          cost: v.cost,
+          amountPaid: v.amountPaid,
+          amountRemaining: v.amountRemaining
+        };
+      });
+    })()
   };
 
   _sc(ck, result);
   return result;
 }
 
-function getDashboardData(period){
+function getDashboardData(period, options){
   var p = period || 'today';
   var ck = 'dash_' + p;
   var cached = _gc(ck);
@@ -1590,7 +1662,8 @@ function getDashboardData(period){
     subscriptions: getSubscriptions('all'),
     tamkeen: getTamkeenStudents('all'),
     rooms: getFilteredBookings('all'),
-    period: p
+    period: p,
+    options: options || {}
   });
 }
 
@@ -2310,7 +2383,7 @@ function processRequest(action,data){
       case 'payTamkeenSnack'        : result = payTamkeenSnack(data);                         break;
 
       // ── Dashboard & Init ──────────────────────────────────────
-      case 'getDashboard'           : result=getDashboardData(data.period||'today');          break;
+      case 'getDashboard'           : result=getDashboardData(data.range||data.period||'today',{limitVisits:data.limitVisits,limitUnpaid:data.limitUnpaid});          break;
       case 'getInitialData'         : result=getInitialData();                                break;
       case 'getOptions'             : result=OPTIONS;                                         break;
       case 'getArchive'             : result=getArchive();                                    break;
