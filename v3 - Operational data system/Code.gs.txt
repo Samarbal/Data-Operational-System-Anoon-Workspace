@@ -232,9 +232,13 @@ function subsSheet(){
 // ═══════════════════════════════════════════════════════════════
 
 function p2(n)     { return String(n).padStart(2,'0'); }
-function fmtD(d)   { return p2(d.getDate())+'-'+p2(d.getMonth()+1)+'-'+d.getFullYear(); }
-function fmtT(d)   { return p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds()); }
-function dayName(d){ return ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'][d.getDay()]; }
+function fmtD(d)   { return Utilities.formatDate(d, "Asia/Gaza", "dd-MM-yyyy"); }
+function fmtT(d)   { return Utilities.formatDate(d, "Asia/Gaza", "HH:mm:ss"); }
+function dayName(d){ 
+  var engDay = Utilities.formatDate(d, "Asia/Gaza", "E"); 
+  var map = {'Sun':'الأحد','Mon':'الاثنين','Tue':'الثلاثاء','Wed':'الأربعاء','Thu':'الخميس','Fri':'الجمعة','Sat':'السبت'};
+  return map[engDay] || '';
+}
 function now()     { var n=new Date(); return {n:n,date:fmtD(n),time:fmtT(n),day:dayName(n)}; }
 function toD(v){
   if(!v) return '';
@@ -533,10 +537,10 @@ function checkoutVisitor(data){
   var entryD=toD(row[V.DATE-1]), entryTi=toT(row[V.IN-1]);
   if(!entryD||!entryTi) return{success:false, error:'تاريخ أو وقت الدخول غير صالح'};
 
-  var dur = freeze ? durBetween(toT(row[V.IN-1]),freeze) : durNow(entryD,entryTi);
+  var exitT=freeze||fmtT(new Date());
+  var dur = durBetween(entryTi, exitT);
   if(!dur||isNaN(parseFloat(dur.decimal))) return{success:false, error:'تعذّر حساب المدة'};
 
-  var exitT=freeze||fmtT(new Date());
   var pc=payCalc(data.cost,data.amountPaid,data.paid&&!data.amountPaid);
 
   var snackAmt = parseFloat(row[V.SNACK-1]) || 0;
@@ -1329,7 +1333,8 @@ function getDashboardDataFromPrefetched(prefetched){
   var allRooms = prefetched.rooms || [];
 
   var todayStr = fmtD(new Date());
-  var todayD = new Date();
+  var _tp = todayStr.split('-');
+  var todayD = new Date(+_tp[2], +_tp[1]-1, +_tp[0]);
   todayD.setHours(0,0,0,0);
   var monthStartD = new Date(todayD.getFullYear(), todayD.getMonth(), 1);
   monthStartD.setHours(0,0,0,0);

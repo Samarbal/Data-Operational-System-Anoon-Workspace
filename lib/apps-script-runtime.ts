@@ -362,6 +362,58 @@ async function runLegacy<T>(
     CacheService: {
       getScriptCache: () => scriptCache
     },
+    Utilities: {
+      formatDate: (date: Date, tz: string, format: string) => {
+        const formatter = new Intl.DateTimeFormat("en-US", {
+          timeZone: tz,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          weekday: "short",
+          hour12: false,
+          hourCycle: "h23"
+        });
+        const parts = formatter.formatToParts(date);
+        const map: Record<string, string> = {};
+        for (const part of parts) {
+          if (part.type !== "literal") {
+            map[part.type] = part.value;
+          }
+        }
+        let out = format;
+        if (map.year) {
+          out = out.replace(/yyyy/g, map.year);
+          out = out.replace(/yy/g, map.year.slice(-2));
+        }
+        if (map.month) {
+          out = out.replace(/MM/g, map.month);
+          out = out.replace(/M/g, parseInt(map.month, 10).toString());
+        }
+        if (map.day) {
+          out = out.replace(/dd/g, map.day);
+          out = out.replace(/d/g, parseInt(map.day, 10).toString());
+        }
+        if (map.hour) {
+          out = out.replace(/HH/g, map.hour);
+          out = out.replace(/H/g, parseInt(map.hour, 10).toString());
+        }
+        if (map.minute) {
+          out = out.replace(/mm/g, map.minute);
+          out = out.replace(/m/g, parseInt(map.minute, 10).toString());
+        }
+        if (map.second) {
+          out = out.replace(/ss/g, map.second);
+          out = out.replace(/s/g, parseInt(map.second, 10).toString());
+        }
+        if (map.weekday) {
+          out = out.replace(/E/g, map.weekday);
+        }
+        return out;
+      }
+    },
     Logger: {
       log: (...args: unknown[]) => {
         if (process.env.NODE_ENV !== "production") {
