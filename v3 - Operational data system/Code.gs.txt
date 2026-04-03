@@ -1389,7 +1389,7 @@ function getDashboardDataFromPrefetched(prefetched){
   var freelanceV = [];
   for(var n=0;n<periodV.length;n++){
     var fv = periodV[n];
-    if(fv.pipeline !== 'برنامج تمكين إنسان' && fv.subType !== 'أسبوعي' && fv.subType !== 'شهري'){
+    if(fv.pipeline !== 'برنامج تمكين إنسان'){
       freelanceV.push(fv);
     }
   }
@@ -1430,6 +1430,8 @@ function getDashboardDataFromPrefetched(prefetched){
 
    for(var f=0;f<freelanceV.length;f++){
     var v1  = freelanceV[f];
+    // Guard: ignore subscriptions for revenue since they are handled separately (prevents double-counting)
+    if(v1.subType !== 'ساعات' && v1.subType !== 'يومي') continue;
     var cst = parseFloat(v1.cost) || 0;
     var snk = parseFloat(v1.snack) || 0;
     var pureCost = cst - snk;
