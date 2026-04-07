@@ -317,6 +317,10 @@ let cachedLogin: string | null = null;
 let cachedSocial: string | null = null;
 
 export function getAdminHtml(): string {
+  // Dev/emulator: avoid serving stale HTML (Index/Script/Styles change frequently).
+  if (process.env.NODE_ENV !== "production") {
+    return renderIndexHtml();
+  }
   cachedAdmin ??= renderIndexHtml();
   return cachedAdmin;
 }

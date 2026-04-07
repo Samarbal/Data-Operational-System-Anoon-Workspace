@@ -10,7 +10,8 @@ export async function POST(req: NextRequest) {
 
   return new NextResponse(getAdminHtml(), {
     headers: {
-      "Content-Type": "text/html; charset=utf-8"
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store, max-age=0"
     }
   });
 }

@@ -30,6 +30,7 @@ function boot() {
   setTbodyLoading('weekly-tbody',13,'جاري تحميل الاشتراكات...');
   setTbodyLoading('monthly-tbody',13,'جاري تحميل الاشتراكات...');
   setTbodyLoading('tamkeen-tbody',9,'جاري تحميل تمكين...');
+  console.log('Sending action:', 'getBootData');
   google.script.run
     .withSuccessHandler(function(d) {
       try{
@@ -52,6 +53,7 @@ function boot() {
         loadAndRenderHalls();
         loadFutureBookings();
         // Deferred secondary fetch: subscriptions + tamkeen only.
+        console.log('Sending action:', 'getSecondaryData');
         google.script.run
           .withSuccessHandler(function(sec){
             APP.subscriptions = Array.isArray(sec&&sec.subscriptions) ? sec.subscriptions : [];
@@ -1257,7 +1259,23 @@ function initEditHallModal(){
 function renderTamkeen(){
   renderTkKPIs();
   var search=((document.getElementById('t-search')||{}).value||'').trim().toLowerCase();
-  var list=APP.tamkeen.filter(function(s){if(s.date)return false;if(APP.tkGroup!=='all'&&s.group!==APP.tkGroup)return false;if(search&&s.name.toLowerCase().indexOf(search)===-1)return false;return true;});
+  var list=APP.tamkeen.filter(function(s){
+    // Allow base/manual rows (empty date). Exclude attendance rows that have a real date value.
+    var hasDate = !!(s.date && String(s.date).trim());
+    if(hasDate) return false;
+    var g = String(s.group||'').trim().toUpperCase();
+    if(APP.tkGroup!=='all' && g !== String(APP.tkGroup||'').trim().toUpperCase()) return false;
+    if(search&&s.name.toLowerCase().indexOf(search)===-1) return false;
+    return true;
+  });
+  // Sort so newest base students are easier to find within each group.
+  list.sort(function(a,b){
+    var ga=String(a.group||'').trim().toUpperCase(), gb=String(b.group||'').trim().toUpperCase();
+    if(ga!==gb) return ga<gb?-1:1;
+    var ra=parseInt(a.rowIndex||a.ri||0,10)||0;
+    var rb=parseInt(b.rowIndex||b.ri||0,10)||0;
+    return rb-ra; // newest first
+  });
   var tb=document.getElementById('tamkeen-tbody');
   if(!list.length){tb.innerHTML='<td colspan="9" class="empty-state">لا توجد نتائج</td>';return;}
   tb.innerHTML=list.map(function(s){
@@ -2127,6 +2145,72 @@ function payTkSnack(baseRow, attRow){
     .processRequest('payTamkeenSnack',{attendanceRowIndex:attRow});
 }
 
+function loadTamkeenData(expectedRowIndex){
+  setTbodyLoading('tamkeen-tbody', 9, 'جاري تحميل تمكين...');
+  console.log('Sending action:', 'getTamkeen');
+  google.script.run
+    .withSuccessHandler(function(res){
+      APP.tamkeen = Array.isArray(res) ? res : [];
+      if(expectedRowIndex){
+        var found = APP.tamkeen.some(function(x){ return (x.rowIndex||x.ri) === expectedRowIndex; });
+        console.log('Tamkeen refresh contains rowIndex?', expectedRowIndex, found);
+      }
+      renderTamkeen();
+    })
+    .withFailureHandler(function(){})
+    .processRequest('getTamkeen',{filter:'all'});
+}
+
+function openManualTamkeenModal(){
+  var g=document.getElementById('mtk-group');
+  var n=document.getElementById('mtk-name');
+  var p=document.getElementById('mtk-phone');
+  var e=document.getElementById('mtk-email');
+  var no=document.getElementById('mtk-notes');
+  if(g) g.value='';
+  if(n) n.value='';
+  if(p) p.value='';
+  if(e) e.value='';
+  if(no) no.value='';
+  openModal('modal-add-tk-manual');
+  setTimeout(function(){ if(n) n.focus(); },120);
+}
+
+function initManualTamkeenModal(){
+  var openBtn=document.getElementById('btn-open-tk-manual');
+  if(openBtn) openBtn.addEventListener('click', openManualTamkeenModal);
+
+  var btn=document.getElementById('btn-mtk-confirm');
+  if(!btn) return;
+  btn.addEventListener('click', function(){
+    var group=String((document.getElementById('mtk-group')||{}).value||'').trim();
+    var name=String((document.getElementById('mtk-name')||{}).value||'').trim();
+    var phone=String((document.getElementById('mtk-phone')||{}).value||'').trim();
+    var email=String((document.getElementById('mtk-email')||{}).value||'').trim();
+    var notes=String((document.getElementById('mtk-notes')||{}).value||'').trim();
+    if(!group){showToast('اختر المجموعة','error');return;}
+    if(!name){showToast('الاسم مطلوب','error');return;}
+    if(['A','B','C','D'].indexOf(group)===-1){showToast('المجموعة غير صحيحة','error');return;}
+
+    btn.disabled=true;btn.textContent='جاري...';
+    console.log('Sending action:', 'addManualTamkeenStudent');
+    google.script.run
+      .withSuccessHandler(function(res){
+        btn.disabled=false;btn.textContent='تأكيد ✓';
+        if(!res.success){showToast(res.error||'فشل','error');return;}
+        console.log('addManualTamkeenStudent response:', res);
+        closeModal('modal-add-tk-manual');
+        showToast('تمت إضافة الطالب ✓','success');
+        loadTamkeenData(res && res.rowIndex ? res.rowIndex : null);
+      })
+      .withFailureHandler(function(err){
+        btn.disabled=false;btn.textContent='تأكيد ✓';
+        showToast('خطأ: '+(err&&err.message?err.message:''),'error');
+      })
+      .processRequest('addManualTamkeenStudent',{group:group,name:name,phone:phone,email:email,notes:notes});
+  });
+}
+
 
 
 
@@ -2145,6 +2229,7 @@ window.onload=function(){
   initSnackModal();
   initSubSnackModal();
   initTkSnackModal();
+  initManualTamkeenModal();
   boot();
 };
 </script>

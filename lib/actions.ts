@@ -41,6 +41,7 @@ export const MUTATING_ACTIONS = new Set<string>([
   "unfreezeTamkeenTime",
   "addSnackToTamkeen",
   "payTamkeenSnack",
+  "addManualTamkeenStudent",
   "social_checkin",
   "social_addFuture",
   "social_addBooking"

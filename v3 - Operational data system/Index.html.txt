@@ -438,7 +438,10 @@
       <button class="btn btn-secondary btn-sm t-group" data-g="D">D — الأحد 12-3</button>
     </div>
     <div class="section" style="margin-top:.75rem;">
-      <input type="text" id="t-search" placeholder="بحث بالاسم..." class="search-sm" style="max-width:260px;width:100%;">
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+        <input type="text" id="t-search" placeholder="بحث بالاسم..." class="search-sm" style="max-width:260px;width:100%;">
+        <button class="btn btn-primary btn-sm" id="btn-open-tk-manual">➕ إضافة طالب منحة</button>
+      </div>
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -759,6 +762,48 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" data-close="modal-edit-tamkeen">إلغاء</button>
       <button class="btn btn-primary" id="btn-et-submit">حفظ التعديلات</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Manual Tamkeen Student -->
+<div class="modal-overlay" id="modal-add-tk-manual">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <h3>➕ إضافة طالب منحة</h3>
+      <button class="modal-close" data-close="modal-add-tk-manual">&#x2715;</button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>المجموعة <span class="req">*</span></label>
+        <select id="mtk-group">
+          <option value="">-- اختر --</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>الاسم <span class="req">*</span></label>
+        <input type="text" id="mtk-name" placeholder="اسم الطالب">
+      </div>
+      <div class="form-group">
+        <label>رقم الهاتف</label>
+        <input type="text" id="mtk-phone" placeholder="05xxxxxxxx">
+      </div>
+      <div class="form-group">
+        <label>الايميل</label>
+        <input type="email" id="mtk-email" placeholder="example@email.com">
+      </div>
+      <div class="form-group" style="grid-column:1/-1;">
+        <label>ملاحظات (اختياري)</label>
+        <textarea id="mtk-notes" rows="2" placeholder="سيتم إضافة كلمة: منحة تلقائياً"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close="modal-add-tk-manual">إلغاء</button>
+      <button class="btn btn-primary" id="btn-mtk-confirm">تأكيد ✓</button>
     </div>
   </div>
 </div>

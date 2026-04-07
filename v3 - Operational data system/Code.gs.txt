@@ -1956,7 +1956,7 @@ function getTamkeenStudents(filter){
     var name=String(row[T.NAME-1]||'').trim();
     if(!name) continue;
 
-    var date=toD(row[T.DATE-1]);
+    var date=toD(String(row[T.DATE-1]||'').trim());
     if(date) continue;
 
     var g=String(row[T.GROUP-1]||'').trim();
@@ -2217,6 +2217,33 @@ function payTamkeenSnack(data){
   return{success:true};
 }
 
+function addManualTamkeenStudent(studentData){
+  studentData = studentData || {};
+  var group = String(studentData.group||'').trim();
+  var name  = String(studentData.name||'').trim();
+  var phone = String(studentData.phone||'').trim();
+  var email = String(studentData.email||'').trim();
+  var notes = String(studentData.notes||'').trim();
+
+  if(!group || ['A','B','C','D'].indexOf(group) === -1) return{success:false,error:'المجموعة غير صحيحة'};
+  if(!name) return{success:false,error:'الاسم مطلوب'};
+
+  // Append base row (active student). Keep DATE empty to be recognized as base row.
+  var s = sheet(SHEET_NAMES.TAMKEEN);
+  var nr = s.getLastRow()+1;
+  var row = new Array(TC).fill('');
+  row[T.GROUP-1] = group;
+  row[T.NAME-1]  = name;
+  row[T.PHONE-1] = phone;
+  row[T.EMAIL-1] = email;
+  row[T.DATE-1]  = ''; // crucial: empty date means base/active student
+  row[T.NOTES-1] = (notes ? (notes + ' | ') : '') + 'منحة';
+
+  writeRow(s, nr, row);
+  invT();
+  return{success:true, rowIndex:nr};
+}
+
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -2366,6 +2393,7 @@ function processRequest(action,data){
 //  invalidateAllCaches();
 
   try{
+    console.log('Received action:', action);
     data = data || {};
     var result;
 
@@ -2418,6 +2446,7 @@ function processRequest(action,data){
       case 'unfreezeTamkeenTime'    : result=unfreezeTamkeenTime(data);                       break;
       case 'addSnackToTamkeen'      : result = addSnackToTamkeen(data);                       break;
       case 'payTamkeenSnack'        : result = payTamkeenSnack(data);                         break;
+      case 'addManualTamkeenStudent': result = addManualTamkeenStudent(data);                 break;
 
       // ── Dashboard & Init ──────────────────────────────────────
       case 'getDashboard'           : result=getDashboardData(data.range||data.period||'today',{limitVisits:data.limitVisits,limitUnpaid:data.limitUnpaid});          break;
