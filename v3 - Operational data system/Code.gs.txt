@@ -706,6 +706,9 @@ function addSnackToSubscription(data){
 
   var c   = parseFloat(srow[S.COST-1])||0;
   var ap  = parseFloat(srow[S.AMT_PAID-1])||0;
+  var prevSnackSub = parseFloat(srow[S.SNACK-1])||0;
+  var newSnackSub  = prevSnackSub + adding;
+  srow[S.SNACK-1]  = newSnackSub;
   var newCost = c + adding;
   
   if(data.paid){
@@ -724,7 +727,7 @@ function addSnackToSubscription(data){
   writeRow(ss, sri, srow);
   invS();
 
-  return{success:true, snack:newSnack, visitorCost:newVisitorCost, visitorAmountRemaining:vNewRem, newCost:newCost, amountRemaining:newRem};
+  return{success:true, snack:newSnack, subSnack:newSnackSub, visitorCost:newVisitorCost, visitorAmountRemaining:vNewRem, newCost:newCost, amountRemaining:newRem};
 }
 
 // ─── Time Freeze — Visitors ────────────────────────────────────
