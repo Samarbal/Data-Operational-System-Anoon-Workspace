@@ -119,9 +119,21 @@ function populateDropdowns() {
   fillSel('ev-paytype', o.PAY_TYPES || [], true); fillSel('ev-account', o.ACCOUNTS || [], true);
   fillSel('as-pipeline', pipelines, true); fillSel('as-paytype', o.PAY_TYPES || [], true); fillSel('as-account', o.ACCOUNTS || [], true);
   fillSel('es-pipeline', pipelines, true); fillSel('es-paytype', o.PAY_TYPES || [], true); fillSel('es-account', o.ACCOUNTS || [], true);
-  fillSel('hb-pipeline', pipelines, true); fillSel('hb-paytype', o.PAY_TYPES || [], true);
-  fillSel('eh-pipeline', pipelines, true); fillSel('eh-paytype', o.PAY_TYPES || [], true);
-  fillSel('rn-new-pipeline', pipelines, true); fillSel('rn-new-paytype', o.PAY_TYPES || [], true);
+  fillSel('ip-paytype', o.PAY_TYPES || [], true); fillSel('ip-account', o.ACCOUNTS || [], true);
+  fillSel('hb-pipeline', pipelines, true); fillSel('hb-paytype', o.PAY_TYPES || [], true); fillSel('hb-account', o.ACCOUNTS || [], true);
+  fillSel('eh-pipeline', pipelines, true); fillSel('eh-paytype', o.PAY_TYPES || [], true); fillSel('eh-account', o.ACCOUNTS || [], true);
+  fillSel('rn-new-pipeline', pipelines, true); fillSel('rn-new-paytype', o.PAY_TYPES || [], true); fillSel('rn-new-account', o.ACCOUNTS || [], true);
+  fillSel('snk-paytype', o.PAY_TYPES || [], true); fillSel('snk-account', o.ACCOUNTS || [], true);
+  
+  toggleAcct('co-paytype', 'co-account-group');
+  toggleAcct('ev-paytype', 'ev-account-group');
+  toggleAcct('as-paytype', 'as-account-group');
+  toggleAcct('es-paytype', 'es-account-group');
+  toggleAcct('ip-paytype', 'ip-account-group');
+  toggleAcct('hb-paytype', 'hb-account-group');
+  toggleAcct('eh-paytype', 'eh-account-group');
+  toggleAcct('rn-new-paytype', 'rn-new-account-group');
+  toggleAcct('snk-paytype', 'snk-account-group');
 }
 
 // ================================================================
@@ -467,7 +479,7 @@ function renderVisitors(){
 
     if(isA){
       acts+='<button class="btn btn-primary btn-sm" onclick="openCheckout('+v.rowIndex+')">خروج</button>';
-      acts+='<button class="btn btn-secondary btn-sm" onclick="openSnack('+v.rowIndex+')" title="إضافة سناك">☕ سناك</button>';
+      // acts+='<button class="btn btn-secondary btn-sm" onclick="openSnack('+v.rowIndex+')" title="إضافة سناك">☕ سناك</button>';
 
       if(v.freezeTime){
         acts+='<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreeze('+v.rowIndex+')">▶ استئناف</button>';
@@ -515,7 +527,7 @@ function renderSubTable(type,filterVal,search,tbodyId){
     ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreeze('+(activeV.rowIndex||activeV.ri)+')">▶ استئناف</button>'
     :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreeze('+(activeV.rowIndex||activeV.ri)+')" title="⏸ تجميد">⏸</button>';
   coBtn='<button class="btn btn-danger btn-sm sub-co-btn" data-vis="'+(activeV.rowIndex||activeV.ri)+'" data-sub="'+(s.rowIndex||s.ri)+'">خروج</button>'
-       +'<button class="btn btn-secondary btn-sm" onclick="openSnack('+(activeV.rowIndex||activeV.ri)+','+(s.rowIndex||s.ri)+')" title="إضافة سناك">☕ سناك</button>'
+       // +'<button class="btn btn-secondary btn-sm" onclick="openSnack('+(activeV.rowIndex||activeV.ri)+','+(s.rowIndex||s.ri)+')" title="إضافة سناك">☕ سناك</button>'
        +freezeBtn;
 }
      else if(!s.isExpired){
@@ -688,17 +700,20 @@ function openCheckout(ri){
     }
   }
 
-  var autoEl=document.getElementById('co-auto-cost');
-  if(autoEl) autoEl.textContent='';
+  // ── تهيئة حقول التكلفة اليدوية ──────────────────────────
+  var hCostEl = document.getElementById('co-hourly-cost');
+  if(hCostEl) hCostEl.value = 0;
+  var sCostEl = document.getElementById('co-snack-input');
+  if(sCostEl) sCostEl.value = snackAmt;
 
   var costEl=document.getElementById('co-cost');
-  if(costEl) costEl.value = snackAmt > 0 ? snackAmt : '';
+  if(costEl) costEl.value = snackAmt;
 
   var apEl=document.getElementById('co-amount-paid');
   if(apEl) apEl.value='';
 
   var remEl=document.getElementById('co-remaining');
-  if(remEl) remEl.textContent='—';
+  if(remEl) remEl.textContent='₪ 0';
 
   document.getElementById('co-paid').checked=false;
   setSel('co-paytype','');
@@ -729,9 +744,25 @@ function initCheckoutModal(){
     if(document.getElementById('co-paid').checked)paid=total;
     var rem=Math.max(0,total-paid);
     var remEl=document.getElementById('co-remaining');
-    if(remEl){remEl.textContent=rem>0?'₪ '+rem.toFixed(2):'✓ مدفوع بالكامل';remEl.style.color=rem>0?'var(--danger)':'var(--success)';}
+    if(remEl){
+      remEl.textContent=rem>0?'₪ '+rem.toFixed(2):'✓ مدفوع بالكامل';
+      remEl.style.color=rem>0?'var(--danger)':'var(--success)';
+    }
     if(rem<=0&&total>0)document.getElementById('co-paid').checked=true;
   }
+  function _calcGrandTotal(){
+    var h = parseFloat(document.getElementById('co-hourly-cost').value)||0;
+    var s = parseFloat(document.getElementById('co-snack-input').value)||0;
+    var total = h + s;
+    var costEl = document.getElementById('co-cost');
+    if(costEl){
+      costEl.value = total;
+      _updateRem(); 
+    }
+  }
+  var hInp=document.getElementById('co-hourly-cost'), sInp=document.getElementById('co-snack-input');
+  if(hInp) hInp.addEventListener('input', _calcGrandTotal);
+  if(sInp) sInp.addEventListener('input', _calcGrandTotal);
   var cEl=document.getElementById('co-cost'),aEl=document.getElementById('co-amount-paid'),pEl=document.getElementById('co-paid');
   if(cEl)cEl.addEventListener('input',_updateRem);
   if(aEl)aEl.addEventListener('input',_updateRem);
@@ -746,7 +777,20 @@ function initCheckoutModal(){
     var apEl=document.getElementById('co-amount-paid');
     var amtPaid=apEl?(parseFloat(apEl.value)||0):0;
     if(document.getElementById('co-paid').checked)amtPaid=totalCost;
-    var data={rowIndex:APP.activeVisRow,cost:totalCost,amountPaid:amtPaid,payType:payType,account:document.getElementById('co-account').value||'',paid:document.getElementById('co-paid').checked};
+    
+    var hcost = parseFloat(document.getElementById('co-hourly-cost').value)||0;
+    var scost = parseFloat(document.getElementById('co-snack-input').value)||0;
+
+    var data={
+      rowIndex:APP.activeVisRow,
+      cost:totalCost,
+      hourlyCost:hcost,
+      snackCost:scost,
+      amountPaid:amtPaid,
+      payType:payType,
+      account:document.getElementById('co-account').value||'',
+      paid:document.getElementById('co-paid').checked
+    };
     btn.disabled=true;btn.textContent='جاري...';
     google.script.run
       .withSuccessHandler(function(res){
@@ -903,6 +947,7 @@ function openRenewSub(ri){
   document.getElementById('rn-new-validity').value='';document.getElementById('rn-new-expiry-out').value='';
   document.getElementById('rn-new-cost').value='';document.getElementById('rn-new-paid').checked=false;
   setSel('rn-new-subtype',sub.subType);setSel('rn-new-pipeline',sub.pipeline||'');setSel('rn-new-paytype','');
+  toggleAcct('rn-new-paytype','rn-new-account-group');
   openModal('modal-renew-sub');
 }
 
@@ -1145,6 +1190,7 @@ function initHallBookModal(){
     document.getElementById('hb-duration').value='';document.getElementById('hb-paid').checked=false;document.getElementById('hb-hall').value='';
     setSel('hb-pipeline','');setSel('hb-paytype','');
     if(APP.today){var dp=APP.today.split('-');document.getElementById('hb-date').value=dp[2]+'-'+dp[1]+'-'+dp[0];}
+    toggleAcct('hb-paytype','hb-account-group');
     openModal('modal-hall-book');
   });
   function updDur(){var s=document.getElementById('hb-start').value,e=document.getElementById('hb-end').value;if(!s||!e)return;var sp=s.split(':'),ep=e.split(':'),d=(+ep[0]*60+ +ep[1])-(+sp[0]*60+ +sp[1]);document.getElementById('hb-duration').value=d>0?(Math.floor(d/60)+'س '+(d%60>0?d%60+'د':'')):'وقت غير صحيح';}
@@ -1238,7 +1284,7 @@ function renderTamkeen(){
       acts+=isFrozen
         ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreezeTk('+tkRow+','+attRow+')">▶ استئناف</button>'
         :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreezeTk('+tkRow+','+attRow+')" title="تجميد">⏸</button>';
-      acts+='<button class="btn btn-secondary btn-sm" onclick="openTkSnack('+tkRow+','+attRow+')" title="إضافة سناك">☕ سناك</button>';
+      // acts+='<button class="btn btn-secondary btn-sm" onclick="openTkSnack('+tkRow+','+attRow+')" title="إضافة سناك">☕ سناك</button>';
     }
     var snackAmt=parseFloat(s.snack)||0;
     var snackPaid=s.snackPaid||'';
@@ -1667,6 +1713,10 @@ function openSnack(rowIndex, subRowIndex){
   document.getElementById('snk-current-snack').textContent = currentSnack > 0 ? '₪' + currentSnack : '—';
   document.getElementById('snk-amount').value              = '';
   document.getElementById('snk-note').value                = '';
+  setSel('snk-paytype', '');
+  setSel('snk-account', '');
+  document.getElementById('snk-paid').checked              = false;
+  toggleAcct('snk-paytype', 'snk-account-group');
   APP._snackNote = '';
   document.getElementById('snk-total-display').textContent = '₪' + baseCost;
   openModal('modal-snack');
@@ -1726,7 +1776,10 @@ function initSnackModal(){
         .processRequest('addSnackToTamkeen',{
           attendanceRowIndex : APP._tkSnackAttRow,
           amount             : adding,
-          note               : APP._snackNote||''
+          note               : APP._snackNote||'',
+          paid               : document.getElementById('snk-paid').checked,
+          payType            : document.getElementById('snk-paytype').value,
+          account            : document.getElementById('snk-account').value
         });
       return;
     }
@@ -1801,7 +1854,10 @@ function initSnackModal(){
         rowIndex        : APP._snackSubRow,
         visitorRowIndex : APP._snackRow,
         amount          : adding,
-        note            : APP._snackNote || ''
+        note            : APP._snackNote || '',
+        paid            : document.getElementById('snk-paid').checked,
+        payType         : document.getElementById('snk-paytype').value,
+        account         : document.getElementById('snk-account').value
       });
 
     } else {
@@ -1850,7 +1906,10 @@ function initSnackModal(){
         .processRequest('addSnackToVisitor',{
           rowIndex : APP._snackRow,
           amount   : adding,
-          note     : APP._snackNote || ''
+          note     : APP._snackNote || '',
+          paid     : document.getElementById('snk-paid').checked,
+          payType  : document.getElementById('snk-paytype').value,
+          account  : document.getElementById('snk-account').value
         });
     }
   });
@@ -1875,6 +1934,10 @@ function openTkSnack(baseRow, attRow){
   document.getElementById('snk-amount').value              = '';
   var noteEl = document.getElementById('snk-note');
   if(noteEl) noteEl.value = '';
+  setSel('snk-paytype', '');
+  setSel('snk-account', '');
+  document.getElementById('snk-paid').checked              = false;
+  toggleAcct('snk-paytype', 'snk-account-group');
   document.getElementById('snk-total-display').textContent = '₪'+APP._tkSnackBase;
   openModal('modal-snack');
   setTimeout(function(){ document.getElementById('snk-amount').focus(); },150);

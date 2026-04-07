@@ -77,7 +77,7 @@ var OPTIONS = {
   SUB_TYPES    : ['ساعات','يومي','أسبوعي','شهري'],
   PIPELINES    : ['وسائل التواصل الاجتماعي','برنامج تمكين إنسان','معرفة شخصية','إعلان','دورة', 'صديق'],
   PAY_TYPES    : ['كاش','تحويل بنكي'],
-  ACCOUNTS     : ['حساب علاء','حساب نور'],
+  ACCOUNTS     : ['بنكي نور', 'محفظة نور', 'محفظة علاء', 'محفظة جوال علاء'],
   ROOMS        : ['A','B','C'],
   TOTAL_CHAIRS : TOTAL_CHAIRS
 };
@@ -543,13 +543,13 @@ function checkoutVisitor(data){
 
   var pc=payCalc(data.cost,data.amountPaid,data.paid&&!data.amountPaid);
 
-  var snackAmt = parseFloat(row[V.SNACK-1]) || 0;
+  var snackAmt = parseFloat(data.snackCost) || 0;
   var pureCost = Math.max(0, pc.cost - snackAmt);
 
   row[V.OUT-1]=exitT; row[V.DUR-1]=dur.label; row[V.DUR_H-1]=dur.decimal;
   row[V.COST-1]=pc.cost; row[V.PAY_T-1]=data.payType||''; row[V.ACCT-1]=data.account||'';
   row[V.PAID-1]=pc.paidFlag; row[V.AMT_PAID-1]=pc.paid; row[V.AMT_REM-1]=pc.rem;
-  row[V.FREEZE-1]=''; row[V.PURE_COST-1]=pureCost;
+  row[V.FREEZE-1]=''; row[V.SNACK-1]=snackAmt; row[V.PURE_COST-1]=pureCost;
 
   writeRow(s,ri,row);
   invV();
@@ -626,14 +626,24 @@ function addSnackToVisitor(data){
   var newCost=currentCost+adding;
   row[V.COST-1]=newCost;
 
-  // تحديث amountRemaining
-  var amtPaid=parseFloat(row[V.AMT_PAID-1])||0;
-  var newRem=Math.max(0,newCost-amtPaid);
-  row[V.AMT_REM-1]=newRem;
-  row[V.PAID-1]=newRem<=0&&newCost>0?'نعم':'لا';
+  // تحديث التفاصيل المالية في حالة الدفع الفوري
+  var amtPaid = parseFloat(row[V.AMT_PAID-1])||0;
+  var newRem = Math.max(0, newCost - amtPaid);
+
+  if(data.paid){
+    var paidNow = parseFloat(data.amount)||0;
+    row[V.AMT_PAID-1] = amtPaid + paidNow;
+    row[V.PAY_T-1]    = data.payType || '';
+    row[V.ACCT-1]     = data.account || '';
+    newRem = Math.max(0, newCost - row[V.AMT_PAID-1]);
+  }
+  row[V.AMT_REM-1]  = newRem;
+  row[V.PAID-1]     = newRem <= 0 && newCost > 0 ? 'نعم' : 'لا';
 
   // ملاحظة
   var noteText=data.note?('سناك: '+data.note+' ₪'+adding):('سناك: ₪'+adding);
+  if(data.paid && data.account) noteText += ' (مدفوع - ' + data.account + ')';
+  
   var existingNotes=String(row[V.NOTES-1]||'').trim();
   row[V.NOTES-1]=existingNotes?existingNotes+' | '+noteText:noteText;
 
@@ -669,11 +679,18 @@ function addSnackToSubscription(data){
 
   // تحديث AMT_REM في سجل الزوار
   var vAmtPaid = parseFloat(vrow[V.AMT_PAID-1])||0;
-  var vNewRem = Math.max(0, newVisitorCost - vAmtPaid);
+  if(data.paid){
+    vrow[V.AMT_PAID-1] = vAmtPaid + adding;
+    vrow[V.PAY_T-1]    = data.payType || '';
+    vrow[V.ACCT-1]     = data.account || '';
+  }
+  var vNewRem = Math.max(0, newVisitorCost - vrow[V.AMT_PAID-1]);
   vrow[V.AMT_REM-1] = vNewRem;
   vrow[V.PAID-1] = vNewRem<=0&&newVisitorCost>0?'نعم':'لا';
 
   var noteText = data.note ? ('سناك: '+data.note+' ₪'+adding) : ('سناك: ₪'+adding);
+  if(data.paid && data.account) noteText += ' (مدفوع - ' + data.account + ')';
+  
   var existingNotes = String(vrow[V.NOTES-1]||'').trim();
   vrow[V.NOTES-1] = existingNotes ? existingNotes+' | '+noteText : noteText;
 
@@ -690,7 +707,14 @@ function addSnackToSubscription(data){
   var c   = parseFloat(srow[S.COST-1])||0;
   var ap  = parseFloat(srow[S.AMT_PAID-1])||0;
   var newCost = c + adding;
-  var newRem  = Math.max(0, newCost - ap);
+  
+  if(data.paid){
+    srow[S.AMT_PAID-1] = ap + adding;
+    srow[S.PAY_T-1]    = data.payType || '';
+    srow[S.ACCT-1]     = data.account || '';
+  }
+  
+  var newRem  = Math.max(0, newCost - srow[S.AMT_PAID-1]);
 
   srow[S.COST-1]    = newCost;
   srow[S.AMT_REM-1] = newRem;
@@ -2164,9 +2188,11 @@ function addSnackToTamkeen(data){
   var currentSnack=parseFloat(row[T.SNACK-1])||0;
   var newSnack=currentSnack+adding;
   row[T.SNACK-1]=newSnack;
-  row[T.SNACK_PAID-1]='لا'; // غير مدفوع افتراضياً
+  row[T.SNACK_PAID-1]=data.paid?'نعم':'لا';
 
   var noteText=data.note?('سناك: '+data.note+' ₪'+adding):('سناك: ₪'+adding);
+  if(data.paid && data.account) noteText += ' (مدفوع - ' + data.account + ')';
+  
   var existingNotes=String(row[T.NOTES-1]||'').trim();
   row[T.NOTES-1]=existingNotes?existingNotes+' | '+noteText:noteText;
 
