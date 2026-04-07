@@ -124,6 +124,8 @@ function populateDropdowns() {
   fillSel('eh-pipeline', pipelines, true); fillSel('eh-paytype', o.PAY_TYPES || [], true); fillSel('eh-account', o.ACCOUNTS || [], true);
   fillSel('rn-new-pipeline', pipelines, true); fillSel('rn-new-paytype', o.PAY_TYPES || [], true); fillSel('rn-new-account', o.ACCOUNTS || [], true);
   fillSel('snk-paytype', o.PAY_TYPES || [], true); fillSel('snk-account', o.ACCOUNTS || [], true);
+  fillSel('snk-sub-account', o.ACCOUNTS || [], true);
+  fillSel('snk-tk-account', o.ACCOUNTS || [], true);
   
   toggleAcct('co-paytype', 'co-account-group');
   toggleAcct('ev-paytype', 'ev-account-group');
@@ -527,7 +529,7 @@ function renderSubTable(type,filterVal,search,tbodyId){
     ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreeze('+(activeV.rowIndex||activeV.ri)+')">▶ استئناف</button>'
     :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreeze('+(activeV.rowIndex||activeV.ri)+')" title="⏸ تجميد">⏸</button>';
   coBtn='<button class="btn btn-danger btn-sm sub-co-btn" data-vis="'+(activeV.rowIndex||activeV.ri)+'" data-sub="'+(s.rowIndex||s.ri)+'">خروج</button>'
-       // +'<button class="btn btn-secondary btn-sm" onclick="openSnack('+(activeV.rowIndex||activeV.ri)+','+(s.rowIndex||s.ri)+')" title="إضافة سناك">☕ سناك</button>'
+       +'<button class="btn btn-secondary btn-sm" onclick="openSubSnackModal('+(activeV.rowIndex||activeV.ri)+','+(s.rowIndex||s.ri)+')" title="إضافة سناك">☕ سناك</button>'
        +freezeBtn;
 }
      else if(!s.isExpired){
@@ -1284,7 +1286,7 @@ function renderTamkeen(){
       acts+=isFrozen
         ?'<button class="btn btn-secondary btn-sm" style="color:var(--warning);border-color:var(--warning);" onclick="doUnfreezeTk('+tkRow+','+attRow+')">▶ استئناف</button>'
         :'<button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="doFreezeTk('+tkRow+','+attRow+')" title="تجميد">⏸</button>';
-      // acts+='<button class="btn btn-secondary btn-sm" onclick="openTkSnack('+tkRow+','+attRow+')" title="إضافة سناك">☕ سناك</button>';
+      acts+='<button class="btn btn-secondary btn-sm" onclick="openTkSnackModal('+tkRow+','+attRow+')" title="إضافة سناك">☕ سناك</button>';
     }
     var snackAmt=parseFloat(s.snack)||0;
     var snackPaid=s.snackPaid||'';
@@ -1684,6 +1686,172 @@ function _applyRoleUI(){
 
 
 
+function _isAllowedAccount(acct){
+  var list = (APP && APP.opts && Array.isArray(APP.opts.ACCOUNTS)) ? APP.opts.ACCOUNTS : [];
+  return list.indexOf(String(acct||'')) !== -1;
+}
+
+function openSubSnackModal(visitorRowIndex, subRowIndex){
+  var visRow = parseInt(visitorRowIndex, 10);
+  var subRow = parseInt(subRowIndex, 10);
+  if(!visRow || !subRow){ showToast('بيانات غير مكتملة','error'); return; }
+  var sub = findSub(subRow);
+  if(!sub){ showToast('الاشتراك غير موجود','error'); return; }
+  APP._subSnackVisRow = visRow;
+  APP._subSnackSubRow = subRow;
+
+  var nameEl = document.getElementById('snk-sub-name');
+  if(nameEl) nameEl.textContent = sub.name || '—';
+  var amtEl = document.getElementById('snk-sub-amount');
+  if(amtEl) amtEl.value = '';
+  setSel('snk-sub-status','مدفوع');
+  setSel('snk-sub-paytype','');
+  setSel('snk-sub-account','');
+  var ag = document.getElementById('snk-sub-account-group');
+  if(ag) ag.style.display = 'none';
+  openModal('modal-snack-sub');
+  setTimeout(function(){ if(amtEl) amtEl.focus(); }, 120);
+}
+
+function openTkSnackModal(baseRowIndex, attendanceRowIndex){
+  var baseRow = parseInt(baseRowIndex, 10);
+  var attRow  = parseInt(attendanceRowIndex, 10);
+  if(!baseRow || !attRow){ showToast('يرجى الانتظار لحظة...','warn'); return; }
+  var s = APP.tamkeen.find(function(x){ return (x.rowIndex||x.ri)===baseRow; });
+  if(!s){ showToast('الطالب غير موجود','error'); return; }
+  APP._tkSnackBaseRow2 = baseRow;
+  APP._tkSnackAttRow2  = attRow;
+  var nameEl = document.getElementById('snk-tk-name');
+  if(nameEl) nameEl.textContent = s.name || '—';
+  var amtEl = document.getElementById('snk-tk-amount');
+  if(amtEl) amtEl.value = '';
+  setSel('snk-tk-status','مدفوع');
+  setSel('snk-tk-paytype','');
+  setSel('snk-tk-account','');
+  var ag = document.getElementById('snk-tk-account-group');
+  if(ag) ag.style.display = 'none';
+  openModal('modal-snack-tk');
+  setTimeout(function(){ if(amtEl) amtEl.focus(); }, 120);
+}
+
+function initSubSnackModal(){
+  var statusEl = document.getElementById('snk-sub-status');
+  var payTypeEl = document.getElementById('snk-sub-paytype');
+  var acctGroup = document.getElementById('snk-sub-account-group');
+  function upd(){
+    var st = (statusEl && statusEl.value) || 'مدفوع';
+    var pt = (payTypeEl && payTypeEl.value) || '';
+    var showAcct = (st === 'مدفوع' && pt === 'تحويل بنكي');
+    if(acctGroup) acctGroup.style.display = showAcct ? '' : 'none';
+  }
+  if(statusEl) statusEl.addEventListener('change', upd);
+  if(payTypeEl) payTypeEl.addEventListener('change', upd);
+  upd();
+
+  var btn = document.getElementById('btn-snk-sub-confirm');
+  if(!btn) return;
+  btn.addEventListener('click', function(){
+    var adding = parseFloat((document.getElementById('snk-sub-amount')||{}).value) || 0;
+    if(!(adding > 0)){ showToast('أدخل مبلغاً صحيحاً','error'); return; }
+    var status = (document.getElementById('snk-sub-status')||{}).value || 'مدفوع';
+    var paid = (status === 'مدفوع');
+    var payType = paid ? ((document.getElementById('snk-sub-paytype')||{}).value || '') : '';
+    var account = '';
+    if(paid){
+      if(!payType){ showToast('يرجى اختيار طريقة الدفع','error'); return; }
+      if(payType === 'تحويل بنكي'){
+        account = ((document.getElementById('snk-sub-account')||{}).value || '');
+        if(!account){ showToast('يرجى اختيار الحساب','error'); return; }
+        if(!_isAllowedAccount(account)){ showToast('الحساب غير مسموح','error'); return; }
+      }
+    }
+    var visRow = parseInt(APP._subSnackVisRow, 10);
+    var subRow = parseInt(APP._subSnackSubRow, 10);
+    if(!visRow || !subRow){ showToast('بيانات غير مكتملة','error'); return; }
+
+    btn.disabled=true; btn.textContent='جاري...';
+    google.script.run
+      .withSuccessHandler(function(res){
+        btn.disabled=false; btn.textContent='تأكيد ✓';
+        if(!res.success){ showToast(res.error||'فشل','error'); return; }
+        closeModal('modal-snack-sub');
+        showToast('تمت إضافة سناك ₪'+adding.toFixed(2)+' ✓', 'success');
+        silentRefresh();
+      })
+      .withFailureHandler(function(e){
+        btn.disabled=false; btn.textContent='تأكيد ✓';
+        showToast('خطأ: '+(e&&e.message?e.message:''),'error');
+      })
+      .processRequest('addSnackToSubscription',{
+        rowIndex        : subRow,
+        visitorRowIndex : visRow,
+        amount          : adding,
+        note            : '',
+        paid            : paid,
+        payType         : payType,
+        account         : account
+      });
+  });
+}
+
+function initTkSnackModal(){
+  var statusEl = document.getElementById('snk-tk-status');
+  var payTypeEl = document.getElementById('snk-tk-paytype');
+  var acctGroup = document.getElementById('snk-tk-account-group');
+  function upd(){
+    var st = (statusEl && statusEl.value) || 'مدفوع';
+    var pt = (payTypeEl && payTypeEl.value) || '';
+    var showAcct = (st === 'مدفوع' && pt === 'تحويل بنكي');
+    if(acctGroup) acctGroup.style.display = showAcct ? '' : 'none';
+  }
+  if(statusEl) statusEl.addEventListener('change', upd);
+  if(payTypeEl) payTypeEl.addEventListener('change', upd);
+  upd();
+
+  var btn = document.getElementById('btn-snk-tk-confirm');
+  if(!btn) return;
+  btn.addEventListener('click', function(){
+    var adding = parseFloat((document.getElementById('snk-tk-amount')||{}).value) || 0;
+    if(!(adding > 0)){ showToast('أدخل مبلغاً صحيحاً','error'); return; }
+    var status = (document.getElementById('snk-tk-status')||{}).value || 'مدفوع';
+    var paid = (status === 'مدفوع');
+    var payType = paid ? ((document.getElementById('snk-tk-paytype')||{}).value || '') : '';
+    var account = '';
+    if(paid){
+      if(!payType){ showToast('يرجى اختيار طريقة الدفع','error'); return; }
+      if(payType === 'تحويل بنكي'){
+        account = ((document.getElementById('snk-tk-account')||{}).value || '');
+        if(!account){ showToast('يرجى اختيار الحساب','error'); return; }
+        if(!_isAllowedAccount(account)){ showToast('الحساب غير مسموح','error'); return; }
+      }
+    }
+    var attRow = parseInt(APP._tkSnackAttRow2, 10);
+    if(!attRow){ showToast('يرجى الانتظار لحظة...','warn'); return; }
+
+    btn.disabled=true; btn.textContent='جاري...';
+    google.script.run
+      .withSuccessHandler(function(res){
+        btn.disabled=false; btn.textContent='تأكيد ✓';
+        if(!res.success){ showToast(res.error||'فشل','error'); return; }
+        closeModal('modal-snack-tk');
+        showToast('تمت إضافة سناك ₪'+adding.toFixed(2)+' ✓', 'success');
+        silentRefresh();
+      })
+      .withFailureHandler(function(e){
+        btn.disabled=false; btn.textContent='تأكيد ✓';
+        showToast('خطأ: '+(e&&e.message?e.message:''),'error');
+      })
+      .processRequest('addSnackToTamkeen',{
+        attendanceRowIndex : attRow,
+        amount             : adding,
+        note               : '',
+        paid               : paid,
+        payType            : payType,
+        account            : account
+      });
+  });
+}
+
 function openSnack(rowIndex, subRowIndex){
   APP._snackRow    = rowIndex;
   APP._snackSubRow = subRowIndex || null;
@@ -1975,6 +2143,8 @@ window.onload=function(){
   initHallBookModal();initEditHallModal();initEditTamkeenModal();
   initFutureEditModal();
   initSnackModal();
+  initSubSnackModal();
+  initTkSnackModal();
   boot();
 };
 </script>

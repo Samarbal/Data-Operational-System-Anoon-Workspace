@@ -1472,12 +1472,15 @@ function getDashboardDataFromPrefetched(prefetched){
   // ── سناك الاشتراكات من سجل الزوار + تجميع حسب (الاسم+الهاتف)
   // لتفادي حلقة تربيعية عند حساب كل اشتراك.
   var subSnackByKey = {};
+  var subSnackPend = 0;
   for(var fs=0;fs<periodV.length;fs++){
     var vs1 = periodV[fs];
     if(vs1.subType !== 'أسبوعي' && vs1.subType !== 'شهري') continue;
     var snkS = parseFloat(vs1.snack)||0;
     if(snkS > 0){
       snackRev += snkS;
+      var remS = parseFloat(vs1.amountRemaining)||0;
+      if(remS > 0) subSnackPend += Math.min(remS, snkS);
       var snackKey = String(vs1.name||'').trim() + '||' + String(vs1.phone||'').trim();
       subSnackByKey[snackKey] = (subSnackByKey[snackKey] || 0) + snkS;
     }
@@ -1526,7 +1529,7 @@ function getDashboardDataFromPrefetched(prefetched){
     }
   }
   var totalRevenueVal = parseFloat((fRev + tRev + rRev + weeklyRev + monthlyRev + snackRev).toFixed(2));
-  var totalPend = parseFloat((fPend + sPend + rPend + tkSnackPend).toFixed(2));
+  var totalPend = parseFloat((fPend + sPend + rPend + tkSnackPend + subSnackPend).toFixed(2));
   var totalColl = parseFloat(Math.max(0, totalRevenueVal - totalPend).toFixed(2));
 
 
@@ -1624,7 +1627,7 @@ function getDashboardDataFromPrefetched(prefetched){
     hallHours        : parseFloat(rH.toFixed(1)),
     totalHours       : parseFloat((fH+tH+rH).toFixed(1)),
     hallBookings     : rooms.length,
-    snackRevenue     : parseFloat(snackRev.toFixed(2)),
+    snackRevenue     : parseFloat((snackRev||0).toFixed(2)),
     totalRevenue     : totalRevenueVal,
 
     freelanceRevenue : parseFloat(fRev.toFixed(2)),
@@ -1634,8 +1637,8 @@ function getDashboardDataFromPrefetched(prefetched){
     monthlyRevenue   : parseFloat(monthlyRev.toFixed(2)),
     tamkeenRevenue   : parseFloat(tRev.toFixed(2)),
     hallRevenue      : parseFloat(rRev.toFixed(2)),
-    collected        : totalColl,
-    pending          : totalPend,
+    collected        : parseFloat((totalColl||0).toFixed(2)),
+    pending          : parseFloat((totalPend||0).toFixed(2)),
     freelanceCollected: parseFloat(fColl.toFixed(2)),
     freelancePending : parseFloat(fPend.toFixed(2)),
     subsCollected    : parseFloat(sColl.toFixed(2)),
