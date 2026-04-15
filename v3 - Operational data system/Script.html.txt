@@ -48,7 +48,7 @@ function boot() {
         renderMonthlySubs();
         renderTamkeen();
         renderVKPIs();
-        showToast('تم تحميل البيانات ✓','success');
+        showToast('Checkout saved','success');
         _applyRoleUI();
         loadAndRenderHalls();
         loadFutureBookings();
@@ -208,7 +208,7 @@ function toggleAcct(ptId,agId){
   var pt=document.getElementById(ptId),ag=document.getElementById(agId);
   if(!pt||!ag)return;
   function upd(){ag.style.display=pt.value==='تحويل بنكي'?'':'none';}
-  upd();pt.onchange=upd;
+  upd();pt.addEventListener('change',upd);
 }
 function findVisitor(ri){
   return APP.visitors.find(function(v){return (v.rowIndex||v.ri)===ri;});
@@ -308,10 +308,8 @@ function openInlinePayment(btn){
   document.getElementById('ip-row').value=rowIndex;
   document.getElementById('ip-total-val').value=total;
   document.getElementById('ip-current-paid').value=currentPaid;
-  var ipPt=document.getElementById('ip-paytype'), ipAg=document.getElementById('ip-account-group');
-  if(ipPt){ipPt.value='';}
-  if(ipAg){ipAg.style.display='none';}
-  if(ipPt){ipPt.onchange=function(){if(ipAg)ipAg.style.display=ipPt.value==='تحويل بنكي'?'':'none';};}
+  document.getElementById('ip-current-paid').value=currentPaid;
+  toggleAcct('ip-paytype', 'ip-account-group');
   openModal('modal-inline-payment');
   document.getElementById('ip-amount').focus();
   document.getElementById('ip-amount').select();
@@ -334,19 +332,19 @@ function initInlinePaymentModal(){
     var payType=(document.getElementById('ip-paytype')||{}).value||'';
     var account=(document.getElementById('ip-account')||{}).value||'';
     if(adding<=0){showToast('أدخل مبلغاً صحيحاً','error');return;}
-    if(!payType){showToast('يرجى اختيار طريقة الدفع','error');return;}
+    // if(!payType){showToast('يرجى اختيار طريقة الدفع','error');return;} // SPEED MODE
     var newPaid=Math.min(total,currentPaid+adding), newRem=Math.max(0,total-newPaid);
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='تأكيد التحصيل';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-inline-payment');
         showToast('تم تحصيل ₪'+adding.toFixed(2)+' ✓','success');
         // تحديث كامل
         silentRefresh();
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد التحصيل';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('updatePayment',{type:type,rowIndex:rowIndex,amountPaid:newPaid,payType:payType,account:account});
   });
 }
@@ -541,17 +539,22 @@ function renderSubTable(type,filterVal,search,tbodyId){
     }
     var acts='<div class="td-actions">'+ciBtn+coBtn+'<button class="btn btn-secondary btn-sm sub-ed-btn" data-row="'+s.rowIndex+'">تعديل</button></div>';
     var rowClass=activeV?'row-active':(s.isExpired?'row-expired':'');
-    var sCost=parseFloat(s.cost)||0,sPaid=parseFloat(s.amountPaid)||0,sRem=parseFloat(s.amountRemaining)||0;
-    var payPct=sCost>0?Math.round(sPaid/sCost*100):0;
+    var baseCost=parseFloat(s.cost)||0, snackCost=parseFloat(s.snack)||0;
+    var totalCost=baseCost+snackCost;
+    var sPaid=parseFloat(s.amountPaid)||0, sRem=parseFloat(s.amountRemaining)||0;
+    var payPct=totalCost>0?Math.round(sPaid/totalCost*100):0;
     var payCell='';
-    if(sCost>0){
+    if(totalCost>0){
       if(sRem<=0){payCell='<span class="badge badge-paid">مكتمل ✓</span>';}
       else{
         var barColor=payPct>=50?'var(--warning)':'var(--danger)';
-        payCell='<div style="min-width:90px;"><div style="font-size:.72rem;display:flex;justify-content:space-between;margin-bottom:2px;"><span style="color:var(--success);">₪'+sPaid+'</span><span style="color:var(--danger);">متبقي ₪'+sRem+'</span></div><div style="background:var(--border);border-radius:4px;height:5px;overflow:hidden;"><div style="width:'+payPct+'%;height:100%;background:'+barColor+';border-radius:4px;"></div></div><button class="btn btn-sm sub-collect-btn" style="margin-top:3px;padding:.15rem .4rem;font-size:.7rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;" data-row="'+(s.rowIndex||s.ri)+'" data-total="'+sCost+'" data-paid="'+sPaid+'" data-name="'+s.name+'" data-type="sub">تحصيل</button></div>';
+        payCell='<div style="min-width:90px;"><div style="font-size:.72rem;display:flex;justify-content:space-between;margin-bottom:2px;"><span style="color:var(--success);">₪'+sPaid+'</span><span style="color:var(--danger);">متبقي ₪'+sRem+'</span></div><div style="background:var(--border);border-radius:4px;height:5px;overflow:hidden;"><div style="width:'+payPct+'%;height:100%;background:'+barColor+';border-radius:4px;"></div></div><button class="btn btn-sm sub-collect-btn" style="margin-top:3px;padding:.15rem .4rem;font-size:.7rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;" data-row="'+(s.rowIndex||s.ri)+'" data-total="'+totalCost+'" data-paid="'+sPaid+'" data-name="'+s.name+'" data-type="sub">تحصيل</button></div>';
       }
     } else {payCell=pb;}
-    return '<tr class="'+rowClass+'"><td>'+s.name+'</td><td>'+s.phone+'</td><td>'+(s.startDate||'—')+'</td><td>'+(s.expiryDate||'—')+'</td><td>'+s.visitsCount+'</td><td>'+(s.totalHours||0)+'س</td><td>'+(s.lastVisit||'—')+'</td><td>'+todayIn+'</td><td>'+(s.cost?'₪'+s.cost:'—')+'</td><td>'+payCell+'</td><td>'+sb+'</td><td>'+acts+'</td></tr>';
+    var costDisplay = totalCost > 0 ? '₪'+totalCost : '—';
+    if(snackCost > 0) costDisplay = '<span title="Base: '+baseCost+' + Snack: '+snackCost+'">'+costDisplay+' ☕</span>';
+
+    return '<tr class="'+rowClass+'"><td>'+s.name+'</td><td>'+s.phone+'</td><td>'+(s.startDate||'—')+'</td><td>'+(s.expiryDate||'—')+'</td><td>'+s.visitsCount+'</td><td>'+(s.totalHours||0)+'س</td><td>'+(s.lastVisit||'—')+'</td><td>'+todayIn+'</td><td>'+costDisplay+'</td><td>'+payCell+'</td><td>'+sb+'</td><td>'+acts+'</td></tr>';
   }).join('');
   tb.querySelectorAll('.sub-ci-btn').forEach(function(b){b.addEventListener('click',function(){openSubCheckin(+b.dataset.row);});});
   tb.querySelectorAll('.sub-co-btn').forEach(function(b){b.addEventListener('click',function(){directSubCheckout(+b.dataset.vis,+b.dataset.sub,b);});});
@@ -563,14 +566,14 @@ function renderWeeklySubs(){renderSubTable('أسبوعي',APP.swFilter,(document
 function renderMonthlySubs(){renderSubTable('شهري',APP.smFilter,(document.getElementById('sm-search')||{}).value,'monthly-tbody');}
 
 function directSubCheckout(visRow,subRow,btn){
-  if(btn){btn.disabled=true;btn.textContent='جاري...';}
+  if(btn){btn.disabled=true;btn.textContent='Processing...';}
   google.script.run
     .withSuccessHandler(function(res){
       if(btn){btn.disabled=false;}
       if(!res.success){showToast(res.error||'فشل الخروج','error');if(btn)btn.textContent='خروج';return;}
       // تحديث كامل
       silentRefresh();
-      showToast('تم تسجيل الخروج ✓','success');
+      showToast('Checkout saved','success');
     })
     .withFailureHandler(function(e){if(btn){btn.disabled=false;btn.textContent='خروج';}showToast('خطأ: '+e.message,'error');})
     .processRequest('subCheckout',{visitorRowIndex:visRow,subRowIndex:subRow});
@@ -621,7 +624,7 @@ function doUnfreeze(rowIndex){
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
       silentRefresh();
-      showToast('▶ تم استئناف احتساب الوقت','success');
+      showToast('Checkout saved','success');
     })
     .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
     .processRequest('unfreezeTime',{rowIndex:rowIndex});
@@ -670,17 +673,17 @@ if(!data.subType){
 }
 
 
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='تسجيل الدخول';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-checkin');
         silentRefresh();
         showToast('تم تسجيل دخول '+data.name,'success');
-        if(res.isFirstVisit)showToast('زيارة أولى ⭐','success');
+        if(res.isFirstVisit)showToast('Checkout saved','success');
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تسجيل الدخول';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('checkin',data);
   });
 }
@@ -697,7 +700,7 @@ function openCheckout(ri){
   var snackEl  = document.getElementById('co-snack-display');
   if(snackEl){
     if(snackAmt > 0){
-      snackEl.textContent = '☕ سناك: ₪' + snackAmt;
+      snackEl.textContent = 'Snack: ' + snackAmt;
       snackEl.style.display = '';
     } else {
       snackEl.style.display = 'none';
@@ -714,14 +717,23 @@ function openCheckout(ri){
   if(costEl) costEl.value = snackAmt;
 
   var apEl=document.getElementById('co-amount-paid');
-  if(apEl) apEl.value='';
+  if(apEl){
+    apEl.value='';
+    apEl.disabled=false;
+    apEl.style.borderColor='';
+    apEl.style.background='';
+  }
 
   var remEl=document.getElementById('co-remaining');
-  if(remEl) remEl.textContent='₪ 0';
+  if(remEl) remEl.textContent='Remaining: 0.00';
+  var warningEl=document.getElementById('co-paid-warning');
+  if(warningEl) warningEl.style.display='none';
 
   document.getElementById('co-paid').checked=false;
   setSel('co-paytype','');
   toggleAcct('co-paytype','co-account-group');
+  if(typeof APP._coSync==='function') APP._coSync();
+  if(typeof APP._coValidate==='function') APP._coValidate();
   startCoTimer();
   openModal('modal-checkout');
   if(apEl) setTimeout(function(){apEl.focus();},200);
@@ -741,47 +753,82 @@ function stopCoTimer(){if(APP.coTimer){clearInterval(APP.coTimer);APP.coTimer=nu
 function initCheckoutModal(){
   var ov=document.getElementById('modal-checkout');
   new MutationObserver(function(){if(!ov.classList.contains('open'))stopCoTimer();}).observe(ov,{attributes:true,attributeFilter:['class']});
-  function _updateRem(){
-    var total=parseFloat(document.getElementById('co-cost').value)||0;
-    var ap=document.getElementById('co-amount-paid');
-    var paid=ap?(parseFloat(ap.value)||0):0;
-    if(document.getElementById('co-paid').checked)paid=total;
-    var rem=Math.max(0,total-paid);
+
+  function validateCheckoutForm(total, paidVal, isPaidFull){
+    var submitBtn=document.getElementById('btn-co-submit');
+    // submitBtn.disabled=!payType; // SPEED MODE: don't disable
+    if(submitBtn) submitBtn.disabled = false;
+
+    var warningEl=document.getElementById('co-paid-warning');
+    var amountEl=document.getElementById('co-amount-paid');
+    var showWarn=(!isPaidFull && total>0 && paidVal<=0);
+    if(warningEl) warningEl.style.display=showWarn?'block':'none';
+    if(amountEl){
+      amountEl.style.borderColor=showWarn?'var(--danger)':'';
+      amountEl.style.background=showWarn?'#fef2f2':'';
+    }
+  }
+
+  function syncCheckoutPaymentSummary(){
+    var h=parseFloat(document.getElementById('co-hourly-cost').value)||0;
+    var s=parseFloat(document.getElementById('co-snack-input').value)||0;
+    var total=Math.max(0,h+s);
+    var costEl=document.getElementById('co-cost');
+    if(costEl) costEl.value=total.toFixed(2);
+
+    var paidEl=document.getElementById('co-amount-paid');
+    var paidFullEl=document.getElementById('co-paid');
+    if(paidEl && paidFullEl){
+      if(paidFullEl.checked){
+        paidEl.value=total.toFixed(2);
+        paidEl.disabled=true;
+      } else {
+        paidEl.disabled=false;
+      }
+    }
+    
+    var paidVal=paidEl?(parseFloat(paidEl.value)||0):0;
+    var rem=Math.max(0,total-paidVal);
     var remEl=document.getElementById('co-remaining');
-    if(remEl){
-      remEl.textContent=rem>0?'₪ '+rem.toFixed(2):'✓ مدفوع بالكامل';
-      remEl.style.color=rem>0?'var(--danger)':'var(--success)';
-    }
-    if(rem<=0&&total>0)document.getElementById('co-paid').checked=true;
+    if(remEl) remEl.textContent=rem>0?('Remaining: '+rem.toFixed(2)):'Paid in full';
+
+    validateCheckoutForm(total, paidVal, !!(paidFullEl && paidFullEl.checked));
   }
-  function _calcGrandTotal(){
-    var h = parseFloat(document.getElementById('co-hourly-cost').value)||0;
-    var s = parseFloat(document.getElementById('co-snack-input').value)||0;
-    var total = h + s;
-    var costEl = document.getElementById('co-cost');
-    if(costEl){
-      costEl.value = total;
-      _updateRem(); 
-    }
-  }
-  var hInp=document.getElementById('co-hourly-cost'), sInp=document.getElementById('co-snack-input');
-  if(hInp) hInp.addEventListener('input', _calcGrandTotal);
-  if(sInp) sInp.addEventListener('input', _calcGrandTotal);
-  var cEl=document.getElementById('co-cost'),aEl=document.getElementById('co-amount-paid'),pEl=document.getElementById('co-paid');
-  if(cEl)cEl.addEventListener('input',_updateRem);
-  if(aEl)aEl.addEventListener('input',_updateRem);
-  if(pEl)pEl.addEventListener('change',function(){if(this.checked){var t=parseFloat(document.getElementById('co-cost').value)||0;var ap=document.getElementById('co-amount-paid');if(ap)ap.value=t;}_updateRem();});
+
+  APP._coSync=syncCheckoutPaymentSummary;
+  APP._coValidate=function(){
+    var total=parseFloat(document.getElementById('co-cost').value)||0;
+    var paidEl=document.getElementById('co-amount-paid');
+    var paidVal=paidEl?(parseFloat(paidEl.value)||0):0;
+    var isPaidFull=!!(document.getElementById('co-paid')||{}).checked;
+    validateCheckoutForm(total, paidVal, isPaidFull);
+  };
+
+  var hInp=document.getElementById('co-hourly-cost');
+  var sInp=document.getElementById('co-snack-input');
+  var aEl=document.getElementById('co-amount-paid');
+  var pEl=document.getElementById('co-paid');
+  var ptEl=document.getElementById('co-paytype');
+  if(hInp) hInp.addEventListener('input', syncCheckoutPaymentSummary);
+  if(sInp) sInp.addEventListener('input', syncCheckoutPaymentSummary);
+  if(aEl) aEl.addEventListener('input', syncCheckoutPaymentSummary);
+  if(pEl) pEl.addEventListener('change', syncCheckoutPaymentSummary);
+  if(ptEl) ptEl.addEventListener('change', function(){
+    toggleAcct('co-paytype','co-account-group');
+    syncCheckoutPaymentSummary();
+  });
+
   document.getElementById('btn-co-submit').addEventListener('click',function(){
     var btn=this;
     var totalCost=parseFloat(document.getElementById('co-cost').value)||0;
     var payType=(document.getElementById('co-paytype')||{}).value||'';
+    if(!payType){showToast('Please select payment method','error');return;}
 
-    //var payType=document.getElementById('co-paytype').value;
-    //if(!payType){showToast('يرجى اختيار طريقة الدفع','error');return;}
     var apEl=document.getElementById('co-amount-paid');
     var amtPaid=apEl?(parseFloat(apEl.value)||0):0;
     if(document.getElementById('co-paid').checked)amtPaid=totalCost;
-    
+    amtPaid=Math.min(totalCost,Math.max(0,amtPaid));
+
     var hcost = parseFloat(document.getElementById('co-hourly-cost').value)||0;
     var scost = parseFloat(document.getElementById('co-snack-input').value)||0;
 
@@ -793,38 +840,51 @@ function initCheckoutModal(){
       amountPaid:amtPaid,
       payType:payType,
       account:document.getElementById('co-account').value||'',
-      paid:document.getElementById('co-paid').checked
+      paid:(document.getElementById('co-paid').checked || (totalCost>0 && amtPaid>=totalCost))
     };
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='تأكيد الخروج';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error,'error');return;}
         stopCoTimer();closeModal('modal-checkout');
         silentRefresh();
-        showToast('تم تسجيل الخروج ✓','success');
-        if((res.amountRemaining||0)>0)showToast('تنبيه: متبقي ₪'+res.amountRemaining.toFixed(2),'warn');
+        showToast('Checkout saved','success');
+        if((res.amountRemaining||0)>0)showToast('Remaining: '+res.amountRemaining.toFixed(2),'warn');
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد الخروج';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('checkout',data);
   });
-}
 
+  syncCheckoutPaymentSummary();
+}
 function openEditVisitor(ri){
   var v=findVisitor(ri);if(!v)return;APP.activeVisRow=ri;
   document.getElementById('ev-name').value=v.name;document.getElementById('ev-phone').value=v.phone;
   document.getElementById('ev-cost').value=v.cost||'';document.getElementById('ev-notes').value=v.notes||'';
-  document.getElementById('ev-paid').checked=v.paid==='نعم';
+  document.getElementById('ev-paid').checked=false;
   document.getElementById('ev-entry-time').value=v.entryTime?v.entryTime.slice(0,5):'';
   document.getElementById('ev-exit-time').value=v.exitTime?v.exitTime.slice(0,5):'';
   setSel('ev-subtype',v.subType);setSel('ev-pipeline',v.pipeline);setSel('ev-paytype',v.payType||'');setSel('ev-account',v.account||'');
   toggleAcct('ev-paytype','ev-account-group');
   var evCost0=parseFloat(v.cost)||0,evPaid0=parseFloat(v.amountPaid)||0;
-  var evPartial=document.getElementById('ev-partial-section'),evAP=document.getElementById('ev-amount-paid'),evRD=document.getElementById('ev-remaining-display');
+  var evPartial=document.getElementById('ev-partial-section'),evAP=document.getElementById('ev-amount-paid'),evRD=document.getElementById('ev-remaining-display'),evCheck=document.getElementById('ev-paid');
   if(evPartial)evPartial.style.display='';
   if(evAP)evAP.value=evPaid0;
-  function _evRem(){var cost=parseFloat(document.getElementById('ev-cost').value)||0;var paid=parseFloat(evAP?evAP.value:0)||0;var r=Math.max(0,cost-paid);if(evRD){evRD.textContent=r>0?'₪ '+r.toFixed(2):'✓ مدفوع بالكامل';evRD.style.color=r>0?'var(--danger)':'var(--success)';}}
+  function _evRem(){
+    var cost=parseFloat(document.getElementById('ev-cost').value)||0;
+    if(evCheck && evCheck.checked && evAP){
+      evAP.value=cost.toFixed(2);
+      evAP.disabled=true;
+    } else if(evAP) {
+      evAP.disabled=false;
+    }
+    var paid=parseFloat(evAP?evAP.value:0)||0;
+    var r=Math.max(0,cost-paid);
+    if(evRD){evRD.textContent=r>0?'₪ '+r.toFixed(2):'✓ مدفوع بالكامل';evRD.style.color=r>0?'var(--danger)':'var(--success)';}
+  }
   _evRem();if(evAP)evAP.oninput=_evRem;
+  if(evCheck)evCheck.onchange=_evRem;
   var evCostInp=document.getElementById('ev-cost');if(evCostInp)evCostInp.oninput=_evRem;
   openModal('modal-edit-visitor');
 }
@@ -837,16 +897,16 @@ function initEditVisitorModal(){
     var evAP=evAPEl&&document.getElementById('ev-partial-section').style.display!=='none'?(parseFloat(evAPEl.value)||0):null;
     var data={rowIndex:APP.activeVisRow,name:document.getElementById('ev-name').value.trim(),phone:document.getElementById('ev-phone').value.trim(),subType:document.getElementById('ev-subtype').value,pipeline:document.getElementById('ev-pipeline').value,cost:evCost,payType:document.getElementById('ev-paytype').value,account:document.getElementById('ev-account').value||'',paid:document.getElementById('ev-paid').checked?'نعم':'لا',notes:document.getElementById('ev-notes').value.trim(),entryTime:et?et+':00':'',exitTime:xt?xt+':00':''};
     if(evAP!==null)data.amountPaid=evAP;
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='حفظ التعديلات';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-edit-visitor');
         silentRefresh();
-        showToast('تم الحفظ ✓','success');
+        showToast('Checkout saved','success');
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('updateVisitor',data);
   });
 }
@@ -860,7 +920,7 @@ function confirmDeleteVisitor(rowIndex, name){
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
-      showToast('تم الحذف ✓','success');
+      showToast('Checkout saved','success');
       APP.visitors = APP.visitors.filter(function(v){return (v.rowIndex||v.ri)!==rowIndex;});
       renderVisitors(); renderVKPIs();
       setTimeout(function(){loadDashboard(APP.dashPeriod);},800);
@@ -898,26 +958,44 @@ function initAddSubModal(){
         .processRequest('lookupByName',{name:name});
     },400);
   });
+  function syncAsPayment(){
+    var cost = parseFloat(document.getElementById('as-cost').value)||0;
+    var paidEl = document.getElementById('as-amount-paid');
+    var checkEl = document.getElementById('as-paid');
+    if(paidEl && checkEl){
+      if(checkEl.checked){
+        paidEl.value = cost.toFixed(2);
+        paidEl.disabled = true;
+      } else {
+        paidEl.disabled = false;
+      }
+    }
+  }
+  var asCostInp = document.getElementById('as-cost'); if(asCostInp) asCostInp.oninput = syncAsPayment;
+  var asPaidInp = document.getElementById('as-amount-paid'); if(asPaidInp) asPaidInp.oninput = syncAsPayment;
+  var asCheckInp = document.getElementById('as-paid'); if(asCheckInp) asCheckInp.onchange = syncAsPayment;
+
   document.getElementById('btn-as-submit').addEventListener('click',function(){
     var btn=this;
     var validityDays=parseInt(document.getElementById('as-validity').value)||0;
     var expiryYMD=document.getElementById('as-expiry').value;
     var asCost=parseFloat(document.getElementById('as-cost').value)||0;
     var asAmtPaidEl=document.getElementById('as-amount-paid');
-    var asAmtPaid=asAmtPaidEl&&asAmtPaidEl.value!==''?parseFloat(asAmtPaidEl.value)||0:asCost;
-    var data={name:document.getElementById('as-name').value.trim(),phone:document.getElementById('as-phone').value.trim(),subType:document.getElementById('as-subtype').value,pipeline:document.getElementById('as-pipeline').value,startDate:document.getElementById('as-start').value,validityDays:validityDays,expiryDate:expiryYMD,cost:asCost,amountPaid:asAmtPaid,payType:document.getElementById('as-paytype').value,account:document.getElementById('as-account').value,paid:document.getElementById('as-paid').checked,notes:document.getElementById('as-notes').value.trim()};
-    if(!data.name||!data.phone||!data.subType||!data.startDate){showToast('يرجى تعبئة الحقول المطلوبة','error');return;}
-    if(!data.validityDays&&!data.expiryDate){showToast('يرجى تحديد مدة الصلاحية أو تاريخ الانتهاء','error');return;}
-    btn.disabled=true;btn.textContent='جاري...';
+    var asAmtPaid=asAmtPaidEl?parseFloat(asAmtPaidEl.value)||0:asCost;
+    if(document.getElementById('as-paid').checked) asAmtPaid=asCost;
+    
+    var data={name:document.getElementById('as-name').value.trim(),phone:document.getElementById('as-phone').value.trim(),subType:document.getElementById('as-subtype').value,pipeline:document.getElementById('as-pipeline').value,startDate:document.getElementById('as-start').value,validityDays:validityDays,expiryDate:expiryYMD,cost:asCost,amountPaid:asAmtPaid,payType:document.getElementById('as-paytype').value,account:document.getElementById('as-account').value,paid:document.getElementById('as-paid').checked?'نعم':'لا',notes:document.getElementById('as-notes').value.trim()};
+    if(!data.name){showToast('يرجى تعبئة الاسم على الأقل','error');return;}
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='حفظ الاشتراك';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-add-sub');
         silentRefresh();
-        showToast('تم إضافة الاشتراك ✓','success');
+        showToast('Checkout saved','success');
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ الاشتراك';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('addSub',data);
   });
 }
@@ -950,6 +1028,7 @@ function openRenewSub(ri){
   document.getElementById('rn-new-start').value=rnToday;
   document.getElementById('rn-new-validity').value='';document.getElementById('rn-new-expiry-out').value='';
   document.getElementById('rn-new-cost').value='';document.getElementById('rn-new-paid').checked=false;
+  if(document.getElementById('rn-new-amount-paid')) document.getElementById('rn-new-amount-paid').value='';
   setSel('rn-new-subtype',sub.subType);setSel('rn-new-pipeline',sub.pipeline||'');setSel('rn-new-paytype','');
   toggleAcct('rn-new-paytype','rn-new-account-group');
   openModal('modal-renew-sub');
@@ -960,7 +1039,7 @@ function initSubCheckinModal(){
     var btn=this;if(!APP.activeSubObj){showToast('خطأ','error');return;}
     var sub=APP.activeSubObj;
     if(sub.isExpired){closeModal('modal-sub-checkin');openRenewSub(sub.rowIndex);return;}
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
         btn.disabled=false; btn.textContent='تسجيل الدخول';
@@ -1018,26 +1097,44 @@ function initSubCheckinModal(){
    
 
 function initRenewSubModal(){
-  function updRnExpiry(){var s=document.getElementById('rn-new-start').value;var v=parseInt(document.getElementById('rn-new-validity').value)||0;if(s&&v>0)document.getElementById('rn-new-expiry-out').value=addDaysToYMD(s,v);else document.getElementById('rn-new-expiry-out').value='';}
-  document.getElementById('rn-new-start').addEventListener('change',updRnExpiry);
-  document.getElementById('rn-new-validity').addEventListener('input',updRnExpiry);
+  function syncRnPayment(){
+    var cost = parseFloat(document.getElementById('rn-new-cost').value)||0;
+    var paidEl = document.getElementById('rn-new-amount-paid');
+    var checkEl = document.getElementById('rn-new-paid');
+    if(paidEl && checkEl){
+      if(checkEl.checked){
+        paidEl.value = cost.toFixed(2);
+        paidEl.disabled = true;
+      } else {
+        paidEl.disabled = false;
+      }
+    }
+  }
+  var rnCostInp = document.getElementById('rn-new-cost'); if(rnCostInp) rnCostInp.oninput = syncRnPayment;
+  var rnPaidInp = document.getElementById('rn-new-amount-paid'); if(rnPaidInp) rnPaidInp.oninput = syncRnPayment;
+  var rnCheckInp = document.getElementById('rn-new-paid'); if(rnCheckInp) rnCheckInp.onchange = syncRnPayment;
+
   document.getElementById('btn-rn-confirm').addEventListener('click',function(){
     var btn=this;
     var validityDays=parseInt(document.getElementById('rn-new-validity').value)||0;
     var expiryYMD=document.getElementById('rn-new-expiry-out').value;
-    var data={name:document.getElementById('rn-new-name').value.trim(),phone:document.getElementById('rn-new-phone').value.trim(),subType:document.getElementById('rn-new-subtype').value,pipeline:document.getElementById('rn-new-pipeline').value,startDate:document.getElementById('rn-new-start').value,validityDays:validityDays,expiryDate:expiryYMD,cost:document.getElementById('rn-new-cost').value||0,payType:document.getElementById('rn-new-paytype').value,paid:document.getElementById('rn-new-paid').checked,notes:''};
-    if(!data.name||!data.subType||!data.startDate){showToast('يرجى تعبئة الحقول المطلوبة','error');return;}
-    if(!data.validityDays&&!data.expiryDate){showToast('يرجى تحديد مدة الصلاحية','error');return;}
-    btn.disabled=true;btn.textContent='جاري...';
+    var rnCost = parseFloat(document.getElementById('rn-new-cost').value)||0;
+    var rnAmtPaidEl = document.getElementById('rn-new-amount-paid');
+    var rnAmtPaid = rnAmtPaidEl ? parseFloat(rnAmtPaidEl.value)||0 : rnCost;
+    if(document.getElementById('rn-new-paid').checked) rnAmtPaid = rnCost;
+
+    var data={name:document.getElementById('rn-new-name').value.trim(),phone:document.getElementById('rn-new-phone').value.trim(),subType:document.getElementById('rn-new-subtype').value,pipeline:document.getElementById('rn-new-pipeline').value,startDate:document.getElementById('rn-new-start').value,validityDays:validityDays,expiryDate:expiryYMD,cost:rnCost,amountPaid:rnAmtPaid,payType:document.getElementById('rn-new-paytype').value,account:document.getElementById('rn-new-account').value,paid:document.getElementById('rn-new-paid').checked?'نعم':'لا',notes:''};
+    if(!data.name){showToast('يرجى تعبئة الاسم على الأقل','error');return;}
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='تأكيد التجديد';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-renew-sub');
         silentRefresh();
         showToast('تم تجديد اشتراك '+data.name+' ✓','success');
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد التجديد';showToast('خطأ: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('addSub',data);
   });
 }
@@ -1049,15 +1146,30 @@ function openEditSub(ri){
   var s=findSub(ri);if(!s)return;APP.activeSubRow=ri;
   document.getElementById('es-name').value=s.name;document.getElementById('es-phone').value=s.phone;
   document.getElementById('es-cost').value=s.cost;document.getElementById('es-notes').value=s.notes;
-  document.getElementById('es-paid').checked=s.paid==='نعم';
+  document.getElementById('es-paid').checked=false;
   document.getElementById('es-expiry').value=s.expiryDate?toYMD(s.expiryDate):'';
   setSel('es-pipeline',s.pipeline);setSel('es-paytype',s.payType||'');setSel('es-account',s.account||'');
   toggleAcct('es-paytype','es-account-group');
   var esCost0=parseFloat(s.cost)||0,esPaid0=parseFloat(s.amountPaid)||0;
-  var esPartial=document.getElementById('es-partial-section'),esAP=document.getElementById('es-amount-paid'),esRD=document.getElementById('es-remaining-display');
+  var esPartial=document.getElementById('es-partial-section'),esAP=document.getElementById('es-amount-paid'),esRD=document.getElementById('es-remaining-display'),esCheck=document.getElementById('es-paid');
   if(esPartial)esPartial.style.display='';if(esAP)esAP.value=esPaid0;
-  function _esRem(){var cost=parseFloat(document.getElementById('es-cost').value)||0;var paid=parseFloat(esAP?esAP.value:0)||0;var r=Math.max(0,cost-paid);if(esRD){esRD.textContent=r>0?'₪ '+r.toFixed(2):'✓ مدفوع بالكامل';esRD.style.color=r>0?'var(--danger)':'var(--success)';}}
+  function _esRem(){
+    var base = parseFloat(document.getElementById('es-cost').value)||0;
+    var snack = parseFloat(s.snack)||0;
+    var total = base + snack;
+    
+    if(esCheck && esCheck.checked && esAP){
+      esAP.value = total.toFixed(2);
+      esAP.disabled = true;
+    } else if(esAP) {
+      esAP.disabled = false;
+    }
+    var paid=parseFloat(esAP?esAP.value:0)||0;
+    var r=Math.max(0,total-paid);
+    if(esRD){esRD.textContent=r>0?'₪ '+r.toFixed(2):'✓ مدفوع بالكامل';esRD.style.color=r>0?'var(--danger)':'var(--success)';}
+  }
   _esRem();if(esAP)esAP.oninput=_esRem;
+  if(esCheck)esCheck.onchange=_esRem;
   var esCostInp=document.getElementById('es-cost');if(esCostInp)esCostInp.oninput=_esRem;
   var activeV=findActiveSubVisitor(s),todayV=null;
   if(!activeV&&s.visitIds){var ids=s.visitIds.split(',').map(function(x){return+x.trim();}).filter(Boolean);for(var i=ids.length-1;i>=0;i--){var v=findVisitor(ids[i]);if(v&&normalizeToDMY(v.entryDate||v.date)===normalizeToDMY(APP.today)){todayV=v;break;}}}
@@ -1128,7 +1240,7 @@ function initEditSubModal(){
               if(!res2.success){
                 showToast('تحذير: فشل تحديث الأوقات — '+res2.error,'error');
               } else {
-                showToast('تم الحفظ مع تحديث الأوقات ✓','success');
+                showToast('Checkout saved','success');
               }
             })
             .withFailureHandler(function(e){
@@ -1147,7 +1259,7 @@ function initEditSubModal(){
           btn.disabled=false; btn.textContent='حفظ التعديلات';
           closeModal('modal-edit-sub');
           silentRefresh();
-          showToast('تم الحفظ ✓','success');
+          showToast('Checkout saved','success');
         }
       })
       .withFailureHandler(function(e){
@@ -1197,20 +1309,38 @@ function initHallBookModal(){
     toggleAcct('hb-paytype','hb-account-group');
     openModal('modal-hall-book');
   });
-  function updDur(){var s=document.getElementById('hb-start').value,e=document.getElementById('hb-end').value;if(!s||!e)return;var sp=s.split(':'),ep=e.split(':'),d=(+ep[0]*60+ +ep[1])-(+sp[0]*60+ +sp[1]);document.getElementById('hb-duration').value=d>0?(Math.floor(d/60)+'س '+(d%60>0?d%60+'د':'')):'وقت غير صحيح';}
-  document.getElementById('hb-start').addEventListener('change',updDur);document.getElementById('hb-end').addEventListener('change',updDur);
+  function syncHbPayment(){
+    var rev = parseFloat(document.getElementById('hb-revenue').value)||0;
+    var paidEl = document.getElementById('hb-amount-paid');
+    var checkEl = document.getElementById('hb-paid');
+    if(paidEl && checkEl){
+      if(checkEl.checked){
+        paidEl.value = rev.toFixed(2);
+        paidEl.disabled = true;
+      } else {
+        paidEl.disabled = false;
+      }
+    }
+  }
+  var hbRevInp = document.getElementById('hb-revenue'); if(hbRevInp) hbRevInp.oninput = syncHbPayment;
+  var hbPaidInp = document.getElementById('hb-amount-paid'); if(hbPaidInp) hbPaidInp.oninput = syncHbPayment;
+  var hbCheckInp = document.getElementById('hb-paid'); if(hbCheckInp) hbCheckInp.onchange = syncHbPayment;
+
   document.getElementById('btn-hb-submit').addEventListener('click',function(){
     var btn=this;var chairs=+document.getElementById('hb-chairs').value||0;
     if(chairs>16){showToast('الحد الأقصى 16 كرسي','error');return;}
     var hbRev=parseFloat(document.getElementById('hb-revenue').value)||0;
     var hbAPEl=document.getElementById('hb-amount-paid');
-    var hbAmtPaid=hbAPEl&&hbAPEl.value!==''?parseFloat(hbAPEl.value)||0:hbRev;
-    var data={name:document.getElementById('hb-name').value.trim(),phone:document.getElementById('hb-phone').value.trim(),hall:document.getElementById('hb-hall').value,pipeline:document.getElementById('hb-pipeline').value,date:document.getElementById('hb-date').value,start:document.getElementById('hb-start').value,end:document.getElementById('hb-end').value,chairs:chairs||'',revenue:hbRev,amountPaid:hbAmtPaid,payType:document.getElementById('hb-paytype').value,paid:document.getElementById('hb-paid').checked,notes:document.getElementById('hb-notes').value.trim()};
-    if(!data.name||!data.hall||!data.date||!data.start||!data.end){showToast('يرجى تعبئة الحقول المطلوبة','error');return;}
-    btn.disabled=true;btn.textContent='جاري...';
+    var hbAmtPaid=hbAPEl?parseFloat(hbAPEl.value)||0:hbRev;
+    if(document.getElementById('hb-paid').checked) hbAmtPaid = hbRev;
+
+    var data={name:document.getElementById('hb-name').value.trim(),phone:document.getElementById('hb-phone').value.trim(),hall:document.getElementById('hb-hall').value,pipeline:document.getElementById('hb-pipeline').value,date:document.getElementById('hb-date').value,start:document.getElementById('hb-start').value,end:document.getElementById('hb-end').value,chairs:chairs||'',revenue:hbRev,amountPaid:hbAmtPaid,payType:document.getElementById('hb-paytype').value,paid:document.getElementById('hb-paid').checked?'نعم':'لا',notes:document.getElementById('hb-notes').value.trim()};
+    if(!data.name){showToast('يرجى تعبئة الاسم على الأقل','error');return;}
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='تأكيد الحجز';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-hall-book');showToast('تم الحجز ✓','success');silentRefresh();})
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='تأكيد الحجز';showToast('خطأ: '+e.message,'error');})
+      .withSuccessHandler(function(res){
+        btn.disabled=false;btn.textContent='Confirm Checkout';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-hall-book');showToast('Checkout saved','success');silentRefresh();})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('addBooking',data);
   });
 }
@@ -1219,13 +1349,25 @@ function openEditHall(ri){
   document.getElementById('eh-name').value=b.name||'';document.getElementById('eh-phone').value=b.phone||'';
   document.getElementById('eh-hall').value=b.hall||'';document.getElementById('eh-chairs').value=b.chairs||'';
   document.getElementById('eh-revenue').value=b.revenue||'';document.getElementById('eh-notes').value=b.notes||'';
-  document.getElementById('eh-paid').checked=b.paid==='نعم';
+  document.getElementById('eh-paid').checked=false;
   setSel('eh-pipeline',b.pipeline||'');setSel('eh-paytype',b.payType||'');toggleAcct('eh-paytype','eh-account-group');
   var ehCost0=parseFloat(b.revenue)||0,ehPaid0=parseFloat(b.amountPaid)||0;
-  var ehPartial=document.getElementById('eh-partial-section'),ehAP=document.getElementById('eh-amount-paid'),ehRD=document.getElementById('eh-remaining-display');
+  var ehPartial=document.getElementById('eh-partial-section'),ehAP=document.getElementById('eh-amount-paid'),ehRD=document.getElementById('eh-remaining-display'),ehCheck=document.getElementById('eh-paid');
   if(ehPartial)ehPartial.style.display='';if(ehAP)ehAP.value=ehPaid0;
-  function _ehRem(){var rev=parseFloat(document.getElementById('eh-revenue').value)||0;var paid=parseFloat(ehAP?ehAP.value:0)||0;var r=Math.max(0,rev-paid);if(ehRD){ehRD.textContent=r>0?'₪ '+r.toFixed(2):'✓ مدفوع بالكامل';ehRD.style.color=r>0?'var(--danger)':'var(--success)';}}
+  function _ehRem(){
+    var rev=parseFloat(document.getElementById('eh-revenue').value)||0;
+    if(ehCheck && ehCheck.checked && ehAP){
+      ehAP.value = rev.toFixed(2);
+      ehAP.disabled = true;
+    } else if(ehAP) {
+      ehAP.disabled = false;
+    }
+    var paid=parseFloat(ehAP?ehAP.value:0)||0;
+    var r=Math.max(0,rev-paid);
+    if(ehRD){ehRD.textContent=r>0?'₪ '+r.toFixed(2):'✓ مدفوع بالكامل';ehRD.style.color=r>0?'var(--danger)':'var(--success)';}
+  }
   _ehRem();if(ehAP)ehAP.oninput=_ehRem;
+  if(ehCheck)ehCheck.onchange=_ehRem;
   var ehRevInp=document.getElementById('eh-revenue');if(ehRevInp)ehRevInp.oninput=_ehRem;
   openModal('modal-edit-hall');
 }
@@ -1238,17 +1380,19 @@ function initEditHallModal(){
     var ehAPEl=document.getElementById('eh-amount-paid'),ehAmtPaid=ehAPEl?(parseFloat(ehAPEl.value)||0):null;
     var data={rowIndex:APP.activeHallRow,name:document.getElementById('eh-name').value.trim(),phone:document.getElementById('eh-phone').value.trim(),room:document.getElementById('eh-hall').value,pipeline:document.getElementById('eh-pipeline').value,cost:ehRevenue,payType:document.getElementById('eh-paytype').value,account:document.getElementById('eh-account')?document.getElementById('eh-account').value||'':'',paid:document.getElementById('eh-paid').checked?'نعم':'لا',notes:fNotes};
     if(ehAmtPaid!==null)data.amountPaid=ehAmtPaid;
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حفظ';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('تم الحفظ ✓','success');silentRefresh();})
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ';showToast('خطأ: '+e.message,'error');})
+      .withSuccessHandler(function(res){
+        btn.disabled=false;btn.textContent='Confirm Checkout';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('Checkout saved','success');silentRefresh();})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('updateRoom',data);
   });
   document.getElementById('btn-eh-delete').addEventListener('click',function(){
-    var btn=this;if(!confirm('هل أنت متأكد من الحذف؟'))return;btn.disabled=true;btn.textContent='جاري...';
+    var btn=this;if(!confirm('هل أنت متأكد من الحذف؟'))return;btn.disabled=true;btn.textContent='Processing...';
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حذف';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('تم الحذف','success');silentRefresh();})
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حذف';showToast('خطأ: '+e.message,'error');})
+      .withSuccessHandler(function(res){
+        btn.disabled=false;btn.textContent='Confirm Checkout';if(!res.success){showToast(res.error,'error');return;}closeModal('modal-edit-hall');showToast('Checkout saved','success');silentRefresh();})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('deleteBooking',{rowIndex:APP.activeHallRow});
   });
 }
@@ -1374,7 +1518,7 @@ function doUnfreezeTk(baseRow,attRow){
     .withSuccessHandler(function(res){
       if(!res.success){showToast(res.error,'error');return;}
       silentRefresh();
-      showToast('▶ تم استئناف الوقت للطالب','success');
+      showToast('Checkout saved','success');
     })
     .withFailureHandler(function(e){showToast('خطأ: '+e.message,'error');})
     .processRequest('unfreezeTamkeenTime',{attendanceRowIndex:attRow});
@@ -1428,13 +1572,14 @@ function initEditTamkeenModal(){
     var s=APP.tamkeen.find(function(x){return x.rowIndex===ri;});
     var ti=document.getElementById('et-time-in').value,to=document.getElementById('et-time-out').value;
     var data={rowIndex:ri,group:document.getElementById('et-group').value.trim(),name:document.getElementById('et-name').value.trim(),phone:document.getElementById('et-phone').value.trim(),email:document.getElementById('et-email').value.trim(),notes:document.getElementById('et-notes').value.trim()};
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     var attIdx=s&&s.attendanceRowIndex?s.attendanceRowIndex:(APP.tkSession[ri]&&APP.tkSession[ri].attendanceRowIndex);
     var needsTimeUpdate=attIdx&&(ti||to),pending=needsTimeUpdate?2:1;
-    function done(){pending--;if(pending<=0){closeModal('modal-edit-tamkeen');silentRefresh();showToast('تم الحفظ ✓','success');}}
+    function done(){pending--;if(pending<=0){closeModal('modal-edit-tamkeen');silentRefresh();showToast('Checkout saved','success');}}
     google.script.run
-      .withSuccessHandler(function(res){btn.disabled=false;btn.textContent='حفظ التعديلات';if(!res.success){showToast(res.error,'error');return;}if(s)Object.assign(s,{group:data.group,name:data.name,phone:data.phone,email:data.email,notes:data.notes});done();})
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast('خطأ: '+e.message,'error');})
+      .withSuccessHandler(function(res){
+        btn.disabled=false;btn.textContent='Confirm Checkout';if(!res.success){showToast(res.error,'error');return;}if(s)Object.assign(s,{group:data.group,name:data.name,phone:data.phone,email:data.email,notes:data.notes});done();})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
       .processRequest('updateTamkeen',data);
     if(needsTimeUpdate){
       google.script.run
@@ -1515,12 +1660,12 @@ function renderFutureHalls(list){
   tb.querySelectorAll('.future-hall-cancel').forEach(function(btn){
     btn.addEventListener('click',function(){
       if(!confirm('إلغاء حجز قاعة '+btn.dataset.name+'؟')) return;
-      btn.disabled=true;btn.textContent='جاري...';
+      btn.disabled=true;btn.textContent='Processing...';
       google.script.run
         .withSuccessHandler(function(res){
           btn.disabled=false;
           if(!res.success){showToast(res.error||'فشل','error');btn.textContent='إلغاء ✕';return;}
-          showToast('تم إلغاء حجز القاعة ✓','success');
+          showToast('Checkout saved','success');
           silentRefresh();
         })
         .withFailureHandler(function(e){btn.disabled=false;btn.textContent='إلغاء ✕';showToast(e.message,'error');})
@@ -1594,7 +1739,7 @@ function renderFutureBookings(list){
           if(!res||!res.success){showToast((res&&res.error)||'فشل تسجيل الدخول','error');return;}
           silentRefresh();
           showToast('تم تسجيل دخول '+name+' ✓','success');
-          if(res.isFirstVisit) showToast('زيارة أولى ⭐','success');
+          if(res.isFirstVisit) showToast('Checkout saved','success');
         })
         .withFailureHandler(function(e){btn.disabled=false;btn.textContent='دخول الآن';showToast('خطأ: '+(e.message||''),'error');})
         .processRequest('checkinFromFuture',{futureRowIndex:ri});
@@ -1668,13 +1813,13 @@ function initFutureEditModal(){
     var payType=(document.getElementById('fe-paytype')||{}).value||'';
     var account=(document.getElementById('fe-account')||{}).value||'';
     if(!name||!dateDMY){showToast('يرجى تعبئة الاسم والتاريخ','error');return;}
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='حفظ التعديلات';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error||'فشل','error');return;}
         closeModal('modal-future-edit');
-        showToast('تم حفظ التعديلات ✓','success');
+        showToast('Checkout saved','success');
         silentRefresh();
       })
       .withFailureHandler(function(e){btn.disabled=false;btn.textContent='حفظ التعديلات';showToast(e.message,'error');})
@@ -2131,7 +2276,6 @@ function openTkSnack(baseRow, attRow){
 
 function payTkSnack(baseRow, attRow){
   if(!attRow){ showToast('يرجى الانتظار...','warn'); return; }
-  if(!confirm('تأكيد دفع السناك؟')) return;
   google.script.run
     .withSuccessHandler(function(res){
       if(!res.success){ showToast(res.error,'error'); return; }
@@ -2139,7 +2283,7 @@ function payTkSnack(baseRow, attRow){
       if(s) s.snackPaid='نعم';
       renderTamkeen();
       silentRefresh();
-      showToast('تم تسجيل دفع السناك ✓','success');
+      showToast('Checkout saved','success');
     })
     .withFailureHandler(function(e){ showToast('خطأ: '+e.message,'error'); })
     .processRequest('payTamkeenSnack',{attendanceRowIndex:attRow});
@@ -2192,15 +2336,15 @@ function initManualTamkeenModal(){
     if(!name){showToast('الاسم مطلوب','error');return;}
     if(['A','B','C','D'].indexOf(group)===-1){showToast('المجموعة غير صحيحة','error');return;}
 
-    btn.disabled=true;btn.textContent='جاري...';
+    btn.disabled=true;btn.textContent='Processing...';
     console.log('Sending action:', 'addManualTamkeenStudent');
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='تأكيد ✓';
+        btn.disabled=false;btn.textContent='Confirm Checkout';
         if(!res.success){showToast(res.error||'فشل','error');return;}
         console.log('addManualTamkeenStudent response:', res);
         closeModal('modal-add-tk-manual');
-        showToast('تمت إضافة الطالب ✓','success');
+        showToast('Checkout saved','success');
         loadTamkeenData(res && res.rowIndex ? res.rowIndex : null);
       })
       .withFailureHandler(function(err){

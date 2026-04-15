@@ -488,7 +488,7 @@
     <!-- تكلفة الساعات والسناك — إدخال يدوي وتجميع تلقائي -->
     <div class="form-grid" style="margin-bottom:0.75rem;">
       <div class="form-group">
-        <label>تكلفة الساعات (₪) <span class="req">*</span></label>
+        <label>تكلفة الساعات (₪)</label>
         <input type="number" id="co-hourly-cost" placeholder="0" min="0" step="0.5">
       </div>
       <div class="form-group">
@@ -497,6 +497,8 @@
       </div>
     </div>
 
+    <div style="border:1px solid var(--border);border-radius:10px;padding:.75rem;background:#f8fafc;margin:.2rem 0 .75rem;">
+      <div style="font-size:.82rem;font-weight:700;color:#0f172a;margin-bottom:.6rem;">Payment Summary</div>
     <div class="form-grid">
       <div class="form-group" style="grid-column: 1 / -1;">
         <label>الإجمالي المستحق (₪) <small style="color:var(--text-muted)">(تجميع تلقائي)</small></label>
@@ -505,13 +507,14 @@
       <div class="form-group">
         <label>المبلغ المدفوع الآن (₪)</label>
         <input type="number" id="co-amount-paid" placeholder="0" min="0" step="0.5">
+        <div id="co-paid-warning" style="display:none;margin-top:.35rem;font-size:.78rem;color:var(--danger);font-weight:700;">يرجى إدخال المبلغ المدفوع أو اختيار مدفوع بالكامل.</div>
       </div>
       <div class="form-group">
         <label>المتبقي</label>
-        <div id="co-remaining" style="padding:.6rem .85rem;background:var(--surface);border:2px solid var(--border);border-radius:9px;font-weight:700;color:var(--danger);font-size:.95rem;min-height:42px;display:flex;align-items:center;">₪ 0</div>
+        <div id="co-remaining" style="padding:.6rem .85rem;background:#fff7ed;border:2px solid #fdba74;border-radius:9px;font-weight:700;color:#b45309;font-size:.95rem;min-height:42px;display:flex;align-items:center;">₪ 0</div>
       </div>
       <div class="form-group">
-        <label>طريقة الدفع <span class="req">*</span></label>
+        <label>طريقة الدفع</label>
         <select id="co-paytype"></select>
       </div>
       <div class="form-group" id="co-account-group" style="display:none;">
@@ -524,6 +527,7 @@
           <label for="co-paid">مدفوع بالكامل</label>
         </div>
       </div>
+    </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" data-close="modal-checkout">إلغاء</button>
@@ -577,12 +581,12 @@
     <div id="as-banner" class="info-banner" style="display:none;"></div>
     <div class="form-grid">
       <div class="form-group"><label>الاسم <span class="req">*</span></label><input type="text" id="as-name" placeholder="ابدأ بالكتابة..."></div>
-      <div class="form-group"><label>الهاتف <span class="req">*</span></label><input type="text" id="as-phone" placeholder="059xxxxxxxx"></div>
-      <div class="form-group"><label>النوع <span class="req">*</span></label>
+      <div class="form-group"><label>الهاتف</label><input type="text" id="as-phone" placeholder="059xxxxxxxx"></div>
+      <div class="form-group"><label>النوع</label>
         <select id="as-subtype"><option value="">-- اختر --</option><option value="أسبوعي">أسبوعي</option><option value="شهري">شهري</option></select>
       </div>
       <div class="form-group"><label>المصدر</label><select id="as-pipeline"></select></div>
-      <div class="form-group"><label>تاريخ البداية <span class="req">*</span></label><input type="date" id="as-start"></div>
+      <div class="form-group"><label>تاريخ البداية</label><input type="date" id="as-start"></div>
       <div class="form-group"><label>مدة الصلاحية (أيام)</label><input type="number" id="as-validity" min="1" placeholder="مثال: 30"></div>
       <div class="form-group"><label>تاريخ الانتهاء (يدوي/محسوب)</label><input type="date" id="as-expiry"></div>
       <div class="form-group"><label>التكلفة الإجمالية (₪)</label><input type="number" id="as-cost" min="0" placeholder="0"></div>
@@ -683,13 +687,13 @@
     <div class="form-grid">
       <div class="form-group"><label>الاسم <span class="req">*</span></label><input type="text" id="hb-name"></div>
       <div class="form-group"><label>الهاتف</label><input type="text" id="hb-phone"></div>
-      <div class="form-group"><label>القاعة <span class="req">*</span></label>
+      <div class="form-group"><label>القاعة</label>
         <select id="hb-hall"><option value="">-- اختر --</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select>
       </div>
       <div class="form-group"><label>المصدر</label><select id="hb-pipeline"></select></div>
-      <div class="form-group"><label>التاريخ <span class="req">*</span></label><input type="date" id="hb-date"></div>
-      <div class="form-group"><label>من <span class="req">*</span></label><input type="time" id="hb-start"></div>
-      <div class="form-group"><label>إلى <span class="req">*</span></label><input type="time" id="hb-end"></div>
+      <div class="form-group"><label>التاريخ</label><input type="date" id="hb-date"></div>
+      <div class="form-group"><label>من</label><input type="time" id="hb-start"></div>
+      <div class="form-group"><label>إلى</label><input type="time" id="hb-end"></div>
       <div class="form-group"><label>المدة</label><input type="text" id="hb-duration" readonly style="background:var(--surface);cursor:default;"></div>
       <div class="form-group"><label>الكراسي (max 16)</label><input type="number" id="hb-chairs" min="1" max="16"></div>
       <div class="form-group"><label>الإيراد الإجمالي (₪)</label><input type="number" id="hb-revenue" min="0" placeholder="0"></div>
@@ -986,7 +990,7 @@
         <div style="font-size:.82rem;color:var(--accent);margin-top:.35rem;font-weight:600;" id="ip-new-remaining"></div>
       </div>
       <div class="form-group">
-        <label>طريقة الدفع <span class="req">*</span></label>
+        <label>طريقة الدفع</label>
         <select id="ip-paytype">
           <option value="">-- اختر --</option>
           <option value="كاش">كاش</option>
@@ -1045,7 +1049,8 @@
       <div class="form-group"><label>التكلفة (₪)</label><input type="number" id="rn-new-cost" min="0" placeholder="0"></div>
       <div class="form-group"><label>طريقة الدفع</label><select id="rn-new-paytype"></select></div>
       <div class="form-group" id="rn-new-account-group" style="display:none;"><label>الحساب</label><select id="rn-new-account"></select></div>
-      <div class="form-group"><div class="checkbox-row" style="margin-top:1.5rem;"><input type="checkbox" id="rn-new-paid"><label for="rn-new-paid">مدفوع</label></div></div>
+      <div class="form-group"><label>المبلغ المدفوع الآن (₪)</label><input type="number" id="rn-new-amount-paid" min="0" placeholder="0 = دفع جزئي لاحقاً"></div>
+      <div class="form-group"><div class="checkbox-row" style="margin-top:1.5rem;"><input type="checkbox" id="rn-new-paid"><label for="rn-new-paid">مدفوع بالكامل</label></div></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" data-close="modal-renew-sub">إلغاء</button>

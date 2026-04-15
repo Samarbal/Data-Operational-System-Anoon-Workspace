@@ -279,6 +279,60 @@ function cmpDMY(a,b){
   return da<db?-1:da>db?1:0;
 }
 
+function dmyToDateSafe(dmy){
+  if(!dmy) return null;
+  var s=String(dmy).trim();
+  var m=s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if(!m) return null;
+  var dd=+m[1], mm=+m[2], yy=+m[3];
+  if(mm<1||mm>12||dd<1||dd>31) return null;
+  var d=new Date(yy,mm-1,dd);
+  if(d.getFullYear()!==yy||d.getMonth()!==mm-1||d.getDate()!==dd) return null;
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function normalizeSubStatus(v){
+  var s=String(v||'').replace(/[\u200e\u200f\u061c]/g,'').trim().toLowerCase();
+  if(!s) return '';
+  if(s==='paused'||s==='pause'||s==='موقوف'||s==='متوقف'||s==='مجمّد'||s==='مجمد'||s==='معلق') return 'paused';
+  if(s==='expired'||s==='منتهي'||s==='منتهية'||s==='منتهى') return 'expired';
+  if(s==='active'||s==='نشط'||s==='ساري'||s==='فعال') return 'active';
+  return '';
+}
+
+/**
+ * Centralized financial calculator for any row (Visitor or Subscription).
+ * Logic: AMT_REM = (TOTAL_COST + SNACK_COST) - AMT_PAID
+ */
+function _syncFinRow(row, type) {
+  var costIdx, snackIdx, paidIdx, remIdx, statIdx;
+
+  if (type === 'vis') {
+    costIdx = V.COST - 1; snackIdx = V.SNACK - 1;
+    paidIdx = V.AMT_PAID - 1; remIdx = V.AMT_REM - 1; statIdx = V.PAID - 1;
+  } else if (type === 'sub') {
+    costIdx = S.COST - 1; snackIdx = S.SNACK - 1;
+    paidIdx = S.AMT_PAID - 1; remIdx = S.AMT_REM - 1; statIdx = S.PAID - 1;
+  } else if (type === 'room') {
+    costIdx = R.COST - 1; snackIdx = -1;
+    paidIdx = R.AMT_PAID - 1; remIdx = R.AMT_REM - 1; statIdx = R.PAID - 1;
+  } else if (type === 'future') {
+    costIdx = FB.COST - 1; snackIdx = -1;
+    paidIdx = FB.AMT_PAID - 1; remIdx = FB.AMT_REM - 1; statIdx = FB.PAID - 1;
+  } else return;
+
+  var cost  = parseFloat(row[costIdx]) || 0;
+  var snack = (snackIdx !== -1) ? (parseFloat(row[snackIdx]) || 0) : 0;
+  var paid  = parseFloat(row[paidIdx]) || 0;
+
+  var total = cost + snack;
+  var rem = Math.max(0, total - paid);
+
+  row[remIdx] = parseFloat(rem.toFixed(2));
+  row[statIdx] = (rem <= 0 && total > 0) ? 'نعم' : 'لا';
+}
+
 function durNow(entryDate,entryTime){
   try{
     var dp=entryDate.split('-'), tp=entryTime.split(':');
@@ -365,11 +419,23 @@ function mapRoom(row,ri){
 function mapSub(row,ri){
   while(row.length<SC) row.push('');
   var today=fmtD(new Date());
+  var todayD=dmyToDateSafe(today);
   var expiry=toD(row[S.EXPIRY-1]);
-  var isExp=expiry?cmpDMY(today,expiry)>0:false;
-  var cost=parseFloat(row[S.COST-1])||0;
-  var ap=parseFloat(row[S.AMT_PAID-1])||0;
-  var ar=isNaN(parseFloat(row[S.AMT_REM-1]))?Math.max(0,cost-ap):parseFloat(row[S.AMT_REM-1]);
+  var expiryD=dmyToDateSafe(expiry);
+  var statusRaw=String(row[S.STATUS-1]||'').trim();
+  var statusNorm=normalizeSubStatus(statusRaw);
+  var isPaused=statusNorm==='paused';
+  var isExpByDate=(todayD&&expiryD)?(todayD.getTime()>expiryD.getTime()):false;
+  var missingOrInvalidExpiry=(!expiry||!expiryD);
+  var isExp=(statusNorm==='expired')||(!isPaused&&(isExpByDate||missingOrInvalidExpiry));
+  var subState=isPaused?'paused':(isExp?'expired':'active');
+  var validityIssue='';
+  if(!expiry) validityIssue='missing_expiry';
+  else if(!expiryD) validityIssue='invalid_expiry';
+  var cost = parseFloat(row[S.COST-1]) || 0;
+  var snack = parseFloat(row[S.SNACK-1]) || 0;
+  var ap = parseFloat(row[S.AMT_PAID-1]) || 0;
+  var ar = Math.max(0, (cost + snack) - ap);
   return{
     ri:ri, rowIndex:ri,
     subId:row[S.ID-1]||'', name:String(row[S.NAME-1]||'').trim(),
@@ -381,7 +447,8 @@ function mapSub(row,ri){
     paid:String(row[S.PAID-1]||'').trim(), notes:String(row[S.NOTES-1]||''),
     visitsCount:parseInt(row[S.VISITS-1])||0, lastVisit:toD(row[S.LAST_V-1]),
     visitIds:String(row[S.VIS_IDS-1]||''), totalHours:parseFloat(row[S.HOURS-1])||0,
-    amountPaid:ap, amountRemaining:ar, isExpired:isExp,
+    amountPaid:ap, amountRemaining:ar, isExpired:isExp, isPaused:isPaused, isActive:subState==='active',
+    subState:subState, statusRaw:statusRaw, statusNorm:statusNorm, expiryValid:!!expiryD, validityIssue:validityIssue,
     snack:parseFloat(row[S.SNACK-1])||0
   };
 }
@@ -590,7 +657,6 @@ function updateVisitor(data){
   var rem=Math.max(0,c-p);
 
   row[V.COST-1]=c; row[V.AMT_PAID-1]=p; row[V.AMT_REM-1]=rem;
-  row[V.PAID-1]=rem<=0&&c>0?'نعم':'لا';
   if(data.paid!==undefined) row[V.PAID-1]=data.paid;
 
   var ti=toT(row[V.IN-1]), to=toT(row[V.OUT-1]);
@@ -684,9 +750,8 @@ function addSnackToSubscription(data){
     vrow[V.PAY_T-1]    = data.payType || '';
     vrow[V.ACCT-1]     = data.account || '';
   }
-  var vNewRem = Math.max(0, newVisitorCost - vrow[V.AMT_PAID-1]);
-  vrow[V.AMT_REM-1] = vNewRem;
-  vrow[V.PAID-1] = vNewRem<=0&&newVisitorCost>0?'نعم':'لا';
+  _syncFinRow(vrow, 'vis');
+  var vNewRem = vrow[V.AMT_REM - 1];
 
   var noteText = data.note ? ('سناك: '+data.note+' ₪'+adding) : ('سناك: ₪'+adding);
   if(data.paid && data.account) noteText += ' (مدفوع - ' + data.account + ')';
@@ -709,7 +774,6 @@ function addSnackToSubscription(data){
   var prevSnackSub = parseFloat(srow[S.SNACK-1])||0;
   var newSnackSub  = prevSnackSub + adding;
   srow[S.SNACK-1]  = newSnackSub;
-  var newCost = c + adding;
   
   if(data.paid){
     srow[S.AMT_PAID-1] = ap + adding;
@@ -717,17 +781,15 @@ function addSnackToSubscription(data){
     srow[S.ACCT-1]     = data.account || '';
   }
   
-  var newRem  = Math.max(0, newCost - srow[S.AMT_PAID-1]);
-
-  srow[S.COST-1]    = newCost;
-  srow[S.AMT_REM-1] = newRem;
-  srow[S.PAID-1]    = newRem<=0&&newCost>0?'نعم':'لا';
+  // المتبقي = (التكلفة الأساسية + السناك) - المدفوع
+  _syncFinRow(srow, 'sub');
+  var newRem = srow[S.AMT_REM - 1];
   srow[S.NOTES-1]   = (String(srow[S.NOTES-1]||'').trim() ? srow[S.NOTES-1]+' | ' : '') + noteText;
 
   writeRow(ss, sri, srow);
   invS();
 
-  return{success:true, snack:newSnack, subSnack:newSnackSub, visitorCost:newVisitorCost, visitorAmountRemaining:vNewRem, newCost:newCost, amountRemaining:newRem};
+  return{success:true, snack:newSnack, subSnack:newSnackSub, visitorCost:newVisitorCost, visitorAmountRemaining:vNewRem, newCost:(c + newSnackSub), amountRemaining:newRem};
 }
 
 // ─── Time Freeze — Visitors ────────────────────────────────────
@@ -787,8 +849,9 @@ function updatePayment(data){
 
     if(!row[V.NAME-1]) return{success:false, error:'صف غير موجود'};
 
-    var c=parseFloat(row[V.COST-1])||0, rem=Math.max(0,c-ap);
-    row[V.AMT_PAID-1]=ap; row[V.AMT_REM-1]=rem; row[V.PAID-1]=rem<=0&&c>0?'نعم':'لا';
+    row[V.AMT_PAID-1]=ap;
+    _syncFinRow(row, 'vis');
+    var rem = row[V.AMT_REM - 1];
     if(data.payType) row[V.PAY_T-1]=data.payType;
     if(data.account) row[V.ACCT-1]=data.account;
 
@@ -804,8 +867,9 @@ function updatePayment(data){
 
     if(!row2[R.NAME-1]) return{success:false, error:'صف غير موجود'};
 
-    var c2=parseFloat(row2[R.COST-1])||0, rem2=Math.max(0,c2-ap);
-    row2[R.AMT_PAID-1]=ap; row2[R.AMT_REM-1]=rem2; row2[R.PAID-1]=rem2<=0&&c2>0?'نعم':'لا';
+    row2[R.AMT_PAID-1]=ap;
+    _syncFinRow(row2, 'room');
+    var rem2 = row2[R.AMT_REM - 1];
     if(data.payType) row2[R.PAY_T-1]=data.payType;
     if(data.account) row2[R.ACCT-1]=data.account;
 
@@ -821,8 +885,9 @@ function updatePayment(data){
 
     if(!row3[S.NAME-1]) return{success:false, error:'صف غير موجود'};
 
-    var c3=parseFloat(row3[S.COST-1])||0, rem3=Math.max(0,c3-ap);
-    row3[S.AMT_PAID-1]=ap; row3[S.AMT_REM-1]=rem3; row3[S.PAID-1]=rem3<=0&&c3>0?'نعم':'لا';
+    row3[S.AMT_PAID-1]=ap;
+    _syncFinRow(row3, 'sub');
+    var rem3 = row3[S.AMT_REM - 1];
 
     writeRow(ss,ri3,row3);
     invS();
@@ -1064,9 +1129,13 @@ function updateFutureBooking(data){
 // 8. SUBSCRIPTIONS
 // ═══════════════════════════════════════════════════════════════
 
-function getSubscriptions(filter){
+function getSubscriptions(filter,opts){
+  opts=opts||{};
   var ck='subs_'+(filter||'all');
-  var cached=_gc(ck); if(cached) return cached;
+  var forceFresh=!!opts.forceFresh;
+  if(!forceFresh){
+    var cached=_gc(ck); if(cached) return cached;
+  }
 
   var s=subsSheet(), lr=s.getLastRow();
   if(lr<=1) return [];
@@ -1077,7 +1146,7 @@ function getSubscriptions(filter){
   for(var i=0;i<rows.length;i++){
     var sub=mapSub(rows[i],i+2);
     if(!sub.name) continue;
-    if(filter==='active'  && sub.isExpired) continue;
+    if(filter==='active'  && !sub.isActive) continue;
     if(filter==='expired' && !sub.isExpired) continue;
         var subType=cleanSubType(sub.subType);
 
@@ -1087,7 +1156,7 @@ function getSubscriptions(filter){
   }
 
   result.reverse();
-  _sc(ck,result);
+  if(!forceFresh) _sc(ck,result);
   return result;
 }
 
@@ -1113,7 +1182,8 @@ function addSubscription(data){
   row[S.PAID-1]=pc.paidFlag; row[S.NOTES-1]=(data.notes||'').trim();
   row[S.VISITS-1]=0; row[S.LAST_V-1]=''; row[S.STATUS-1]='نشط';
   row[S.VIS_IDS-1]=''; row[S.HOURS-1]=0;
-  row[S.AMT_PAID-1]=pc.paid; row[S.AMT_REM-1]=pc.rem;
+  row[S.AMT_PAID-1]=pc.paid;
+  _syncFinRow(row, 'sub');
 
   var nr=s.getLastRow()+1;
   writeRow(s,nr,row);
@@ -1132,12 +1202,39 @@ function subCheckin(data){
   while(srow.length < SC) srow.push('');
 
   var today = fmtD(new Date());
+  var todayD = dmyToDateSafe(today);
   var expiry = toD(srow[S.EXPIRY-1]);
-  var isExp = expiry ? cmpDMY(today, expiry) > 0 : false;
+  var expiryD = dmyToDateSafe(expiry);
+  var statusNorm = normalizeSubStatus(srow[S.STATUS-1]);
+  var isPaused = statusNorm==='paused';
+  var isExp = (statusNorm==='expired') || ((todayD&&expiryD) ? (todayD.getTime()>expiryD.getTime()) : false);
   var name = String(srow[S.NAME-1] || '').trim();
   var phone = String(srow[S.PHONE-1] || '').trim();
   var subType = cleanSubType(srow[S.TYPE-1] || '');
   var pipeline = String(srow[S.PIPE-1] || '');
+
+  if(isPaused){
+    return {
+      success:false,
+      paused:true,
+      error:'اشتراك ' + name + ' موقوف مؤقتاً',
+      name:name,
+      phone:phone,
+      subType:subType
+    };
+  }
+
+  if(!expiryD){
+    return {
+      success:false,
+      invalidValidity:true,
+      error:'صيغة تاريخ انتهاء الاشتراك غير صالحة لـ ' + name + ': ' + (expiry || '—'),
+      name:name,
+      phone:phone,
+      subType:subType,
+      expiryDate:expiry
+    };
+  }
 
   if(isExp){
     return {
@@ -1196,6 +1293,7 @@ function subCheckin(data){
   srow[S.VIS_IDS-1] = ids;
   srow[S.STATUS-1] = 'نشط';
   writeRow(ss, si, srow);
+  _upsertArchiveBatch(name,phone,pipeline,t.date);
 
   invV();
   invS();
@@ -1242,6 +1340,22 @@ function subCheckout(data){
     }
   }
 
+  try{
+    var visRi=parseInt(data.visitorRowIndex,10);
+    if(visRi){
+      var vs2=sheet(SHEET_NAMES.VISITORS);
+      var vrow=vs2.getRange(visRi,1,1,VC).getValues()[0];
+      while(vrow.length<VC) vrow.push('');
+      _upsertArchiveBatch(
+        String(vrow[V.NAME-1]||'').trim(),
+        String(vrow[V.PHONE-1]||'').trim(),
+        String(vrow[V.PIPE-1]||'').trim(),
+        toD(vrow[V.DATE-1])||fmtD(new Date()),
+        {touchOnly:true}
+      );
+    }
+  }catch(_e){}
+
   return res;
 }
 
@@ -1264,12 +1378,11 @@ function updateSubscription(data){
   if(data.expiryDate&&data.expiryDate!=='')
     row[S.EXPIRY-1]=(data.expiryDate.split('-')[0].length===4)?ymdToDmy(data.expiryDate):data.expiryDate;
 
-  var c=data.cost!==undefined?parseFloat(data.cost)||0:parseFloat(row[S.COST-1])||0;
-  var p=data.amountPaid!==undefined?parseFloat(data.amountPaid)||0:parseFloat(row[S.AMT_PAID-1])||0;
-  var rem=Math.max(0,c-p);
+  if(data.cost!==undefined)       row[S.COST-1]=parseFloat(data.cost)||0;
+  if(data.amountPaid!==undefined) row[S.AMT_PAID-1]=parseFloat(data.amountPaid)||0;
+  if(data.snack!==undefined)      row[S.SNACK-1]=parseFloat(data.snack)||0;
 
-  row[S.COST-1]=c; row[S.AMT_PAID-1]=p; row[S.AMT_REM-1]=rem;
-  row[S.PAID-1]=rem<=0&&c>0?'نعم':'لا';
+  _syncFinRow(row, 'sub');
   if(data.paid!==undefined) row[S.PAID-1]=data.paid;
 
   writeRow(s,ri,row);
@@ -1593,7 +1706,7 @@ function getDashboardDataFromPrefetched(prefetched){
     'sub',
     function(s){ return s.startDate; },
     function(s){ return s.subType; },
-    function(s){ return s.cost; }
+    function(s){ return (parseFloat(s.cost)||0) + (parseFloat(s.snack)||0); }
   );
 
    var unpaidTkSnack=[];
@@ -1847,7 +1960,6 @@ function updateRoom(data){
   var rem=Math.max(0,c-p);
 
   row[R.COST-1]=c; row[R.AMT_PAID-1]=p; row[R.AMT_REM-1]=rem;
-  row[R.PAID-1]=rem<=0&&c>0?'نعم':'لا';
   if(data.paid!==undefined) row[R.PAID-1]=data.paid;
 
   writeRow(s,ri,row);
@@ -1871,8 +1983,15 @@ function deleteBooking(data){ return deleteRoom(data); }
 
 var _archivePending=[];
 
-function _upsertArchiveBatch(name,phone,pipeline,date){
-  _archivePending.push({name:name, phone:phone, pipeline:pipeline, date:date});
+function _upsertArchiveBatch(name,phone,pipeline,date,opts){
+  opts=opts||{};
+  _archivePending.push({
+    name:name,
+    phone:phone,
+    pipeline:pipeline,
+    date:date,
+    touchOnly:!!opts.touchOnly
+  });
 }
 
 function _flushArchive(){
@@ -1897,7 +2016,9 @@ function _flushArchive(){
     if(indexMap.hasOwnProperty(key2)){
       var idx = indexMap[key2];
       existing[idx][3] = item.date;
-      existing[idx][4] = (parseInt(existing[idx][4],10) || 0) + 1;
+      if(!item.touchOnly){
+        existing[idx][4] = (parseInt(existing[idx][4],10) || 0) + 1;
+      }
       if(item.pipeline && !existing[idx][5]) existing[idx][5] = item.pipeline;
     }else{
       indexMap[key2] = existing.length + toAdd.length;
@@ -2423,7 +2544,7 @@ function processRequest(action,data){
       case 'updateFutureBooking'    : result=updateFutureBooking(data);                       break;
 
       // ── Subscriptions ─────────────────────────────────────────
-      case 'getSubs'                : result=getSubscriptions(data.filter);                   break;
+      case 'getSubs'                : result=getSubscriptions(data.filter,{forceFresh:!!data.forceFresh});                   break;
       case 'addSub'                 : result=addSubscription(data);                           break;
       case 'subCheckin'             : result=subCheckin(data);                                break;
       case 'subCheckout'            : result=subCheckout(data);                               break;
