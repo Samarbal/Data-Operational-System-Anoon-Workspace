@@ -15,7 +15,8 @@ var APP = {
   coTimer:null, coDate:'', coTime:'',
   activeVisRow:null, activeSubRow:null, activeSubObj:null,
   activeHallRow:null, activeTkRow:null,
-  tkSession:{}
+  tkSession:{},
+  visMap:{}
 };
 
 // ================================================================
@@ -35,6 +36,9 @@ function boot() {
     .withSuccessHandler(function(d) {
       try{
         APP.visitors      = Array.isArray(d&&d.visitors) ? d.visitors : [];
+        APP.visMap        = {};
+        APP.visitors.forEach(function(v){ APP.visMap[v.rowIndex||v.ri]=v; });
+
         APP.subscriptions = [];
         APP.tamkeen       = [];
         APP.opts          = (d&&d.opts) || {};
@@ -211,6 +215,7 @@ function toggleAcct(ptId,agId){
   upd();pt.addEventListener('change',upd);
 }
 function findVisitor(ri){
+  if(APP.visMap && APP.visMap[ri]) return APP.visMap[ri];
   return APP.visitors.find(function(v){return (v.rowIndex||v.ri)===ri;});
 }
 function findSub(ri){
@@ -392,6 +397,9 @@ function silentRefresh(){
   google.script.run
     .withSuccessHandler(function(d){
       APP.visitors = d.visitors || [];
+      APP.visMap = {};
+      APP.visitors.forEach(function(v){ APP.visMap[v.rowIndex||v.ri]=v; });
+      
       APP.dashData = d.dashboard || {};
       APP.today = normalizeToDMY(d.today || APP.today);
 

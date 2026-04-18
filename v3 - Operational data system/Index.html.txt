@@ -15,6 +15,9 @@
 
   function parseResponse(response) {
     var ct = response.headers.get('content-type') || '';
+    if (ct.indexOf('text/html') !== -1) {
+      return Promise.reject(new Error('Session Expired. Please refresh.'));
+    }
     if (ct.indexOf('application/json') !== -1) return response.json();
     return response.text();
   }

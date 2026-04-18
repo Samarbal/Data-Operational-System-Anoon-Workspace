@@ -1574,7 +1574,7 @@ function getDashboardDataFromPrefetched(prefetched){
     if(v1.subType !== 'ساعات' && v1.subType !== 'يومي') continue;
     var cst = parseFloat(v1.cost) || 0;
     var snk = parseFloat(v1.snack) || 0;
-    var pureCost = cst - snk;
+    var pureCost = cst; // Stop subtracting snack from base cost
 
     fRev  += pureCost;
     fColl += parseFloat(v1.amountPaid) || 0;
@@ -1620,8 +1620,8 @@ function getDashboardDataFromPrefetched(prefetched){
     sColl += purePaid;
     sPend += pureRem;
 
-    if(s1.subType === 'أسبوعي') weeklyRev += Math.max(0, c2 - subSnack);
-    else if(s1.subType === 'شهري') monthlyRev += Math.max(0, c2 - subSnack);
+    if(s1.subType === 'أسبوعي') weeklyRev += c2;
+    else if(s1.subType === 'شهري') monthlyRev += c2;
   }
 
   for(var h=0;h<tkToday.length;h++) tRev += parseFloat(tkToday[h].cost) || 0;
@@ -2399,39 +2399,6 @@ function include(f){
 
 
 
-function getInitialData() {
-  var todayStr = fmtD(new Date());
-  var cachedInit = _gc(INIT_CACHE_KEY);
-  if(cachedInit && cachedInit.today === todayStr) return cachedInit;
-
-  var todayVisitors = getVisitors('today');
-  var allSubs = getSubscriptions('all');
-  var allTk   = getTamkeenStudents('all');
-  var dash = _gc('dash_today');
-  if(!dash){
-    var allV = getVisitors('all');
-    var allRooms = getFilteredBookings('all');
-    dash = getDashboardDataFromPrefetched({
-      visitors      : allV,
-      subscriptions : allSubs,
-      tamkeen       : allTk,
-      rooms         : allRooms,
-      period        : 'today'
-    });
-  }
-
-  var payload = {
-    visitors      : todayVisitors,
-    subscriptions : allSubs,
-    tamkeen       : allTk,
-    opts          : OPTIONS,
-    today         : todayStr,
-    todayDay      : dayName(new Date()),
-    dashboard     : dash
-  };
-  _sc(INIT_CACHE_KEY, payload);
-  return payload;
-}
 
 function getBootData() {
   var todayStr = fmtD(new Date());
@@ -2500,21 +2467,9 @@ function invalidateAllCaches() {
 }
 
 //  — دالة خفيفة للتحديث بعد العمليات
-function getLightRefresh() {
-  return {
-    visitors      : getVisitors('today'),
-    subscriptions : getSubscriptions('all'),
-    tamkeen       : getTamkeenStudents('all'),
-    dashboard     : getDashboardData('today'),
-    today         : fmtD(new Date())
-  };
-}
 
 function processRequest(action,data){
   _archivePending = [];
- // _resetSheetCaches();
-
-//  invalidateAllCaches();
 
   try{
     console.log('Received action:', action);
