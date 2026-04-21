@@ -684,14 +684,14 @@ if(!data.subType){
     btn.disabled=true;btn.textContent='Processing...';
     google.script.run
       .withSuccessHandler(function(res){
-        btn.disabled=false;btn.textContent='Confirm Checkout';
+        btn.disabled=false;btn.textContent='Checkin';
         if(!res.success){showToast(res.error,'error');return;}
         closeModal('modal-checkin');
         silentRefresh();
         showToast('تم تسجيل دخول '+data.name,'success');
         if(res.isFirstVisit)showToast('Checkout saved','success');
       })
-      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Confirm Checkout';showToast('Error: '+e.message,'error');})
+      .withFailureHandler(function(e){btn.disabled=false;btn.textContent='Checkin';showToast('Error: '+e.message,'error');})
       .processRequest('checkin',data);
   });
 }
