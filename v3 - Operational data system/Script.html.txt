@@ -1947,6 +1947,7 @@ function initSubSnackModal(){
         if(!res.success){ showToast(res.error||'فشل','error'); return; }
         closeModal('modal-snack-sub');
         showToast('تمت إضافة سناك ₪'+adding.toFixed(2)+' ✓', 'success');
+        loadSubscriptions();
         silentRefresh();
       })
       .withFailureHandler(function(e){
@@ -2169,9 +2170,7 @@ function initSnackModal(){
           
           closeModal('modal-snack');
           renderVisitors();
-          renderSubTable('ساعات',APP.shFilter,(document.getElementById('sh-search')||{}).value,'hourly-tbody');
-          renderWeeklySubs();
-          renderMonthlySubs();
+          loadSubscriptions();
           showToast('تمت إضافة سناك ₪'+adding+' للاشتراك ✓','success');
           if(res.amountRemaining > 0) showToast('غير محصّل: ₪'+res.amountRemaining.toFixed(2),'warn');
         })
@@ -2295,6 +2294,27 @@ function payTkSnack(baseRow, attRow){
     })
     .withFailureHandler(function(e){ showToast('خطأ: '+e.message,'error'); })
     .processRequest('payTamkeenSnack',{attendanceRowIndex:attRow});
+}
+
+function loadSubscriptions(){
+  setTbodyLoading('weekly-tbody', 13, 'Syncing...');
+  setTbodyLoading('monthly-tbody', 13, 'Syncing...');
+  var hTb=document.getElementById('hourly-tbody');
+  if(hTb) setTbodyLoading('hourly-tbody', 11, 'Syncing...');
+  
+  google.script.run
+    .withSuccessHandler(function(res){
+      APP.subscriptions = Array.isArray(res) ? res : [];
+      renderWeeklySubs();
+      renderMonthlySubs();
+      if(hTb) renderSubTable('ساعات',APP.shFilter,(document.getElementById('sh-search')||{}).value,'hourly-tbody');
+    })
+    .withFailureHandler(function(){
+      renderWeeklySubs();
+      renderMonthlySubs();
+      if(hTb) renderSubTable('ساعات',APP.shFilter,(document.getElementById('sh-search')||{}).value,'hourly-tbody');
+    })
+    .processRequest('getSubs',{filter:'all', forceFresh:true});
 }
 
 function loadTamkeenData(expectedRowIndex){
