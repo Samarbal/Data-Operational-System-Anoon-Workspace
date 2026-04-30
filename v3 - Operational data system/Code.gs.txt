@@ -326,7 +326,8 @@ function _syncFinRow(row, type) {
   var snack = (snackIdx !== -1) ? (parseFloat(row[snackIdx]) || 0) : 0;
   var paid  = parseFloat(row[paidIdx]) || 0;
 
-  var total = cost + snack;
+  // V.COST already includes snack, S.COST is base cost
+  var total = type === 'sub' ? cost + snack : cost;
   var rem = Math.max(0, total - paid);
 
   row[remIdx] = parseFloat(rem.toFixed(2));
@@ -1574,11 +1575,17 @@ function getDashboardDataFromPrefetched(prefetched){
     if(v1.subType !== 'ساعات' && v1.subType !== 'يومي') continue;
     var cst = parseFloat(v1.cost) || 0;
     var snk = parseFloat(v1.snack) || 0;
-    var pureCost = cst; // Stop subtracting snack from base cost
+    var pureCost = Math.max(0, cst - snk); // Fix: Category_Total = SUM(Total_Cost - Snack_Cost)
+
+    var isPaid = String(v1.paid || '').trim() === 'نعم';
+    var fRemAmt = parseFloat(v1.amountRemaining);
+    if(isNaN(fRemAmt)) fRemAmt = Math.max(0, cst - (parseFloat(v1.amountPaid)||0));
+    var pendingAmt = 0;
+    if(!isPaid) pendingAmt = fRemAmt > 0 ? fRemAmt : cst;
 
     fRev  += pureCost;
-    fColl += parseFloat(v1.amountPaid) || 0;
-    fPend += parseFloat(v1.amountRemaining) || 0;
+    fPend += pendingAmt;
+    fColl += isPaid ? cst : Math.max(0, cst - pendingAmt);
     snackRev += snk;
 
     if(v1.subType === 'ساعات')     hourlyRev += pureCost;
@@ -1595,8 +1602,16 @@ function getDashboardDataFromPrefetched(prefetched){
     var snkS = parseFloat(vs1.snack)||0;
     if(snkS > 0){
       snackRev += snkS;
-      var remS = parseFloat(vs1.amountRemaining)||0;
-      if(remS > 0) subSnackPend += Math.min(remS, snkS);
+      var isSnkPaid = String(vs1.paid || '').trim() === 'نعم';
+      var remS = parseFloat(vs1.amountRemaining);
+      if(isNaN(remS)) remS = Math.max(0, snkS - (parseFloat(vs1.amountPaid)||0));
+      
+      var pendingAmount = 0;
+      if (!isSnkPaid) {
+        pendingAmount = remS > 0 ? Math.min(remS, snkS) : snkS;
+      }
+      subSnackPend += pendingAmount;
+      
       var snackKey = String(vs1.name||'').trim() + '||' + String(vs1.phone||'').trim();
       subSnackByKey[snackKey] = (subSnackByKey[snackKey] || 0) + snkS;
     }
@@ -1607,15 +1622,19 @@ function getDashboardDataFromPrefetched(prefetched){
     if(!inP(s1.startDate)) continue;
     var c2    = parseFloat(s1.cost) || 0;
     
+    var isPaid2 = String(s1.paid || '').trim() === 'نعم';
     var paid2 = parseFloat(s1.amountPaid) || 0;
     var rem2  = parseFloat(s1.amountRemaining);
     if(isNaN(rem2)) rem2 = Math.max(0, c2 - paid2);
 
+    var sPending = 0;
+    if(!isPaid2) sPending = rem2 > 0 ? rem2 : c2;
+
     var subKey = String(s1.name||'').trim() + '||' + String(s1.phone||'').trim();
     var subSnack = subSnackByKey[subKey] || 0;
 
-    var purePaid = Math.max(0, paid2 - subSnack);
-    var pureRem  = Math.max(0, rem2  - subSnack);
+    var pureRem = Math.max(0, sPending - subSnack);
+    var purePaid = isPaid2 ? Math.max(0, c2 - subSnack) : Math.max(0, (c2 - sPending) - subSnack);
 
     sColl += purePaid;
     sPend += pureRem;
@@ -1628,9 +1647,17 @@ function getDashboardDataFromPrefetched(prefetched){
 
   for(var i1=0;i1<rooms.length;i1++){
     var r1 = rooms[i1];
-    rRev += parseFloat(r1.revenue) || 0;
-    rColl += parseFloat(r1.amountPaid) || 0;
-    rPend += parseFloat(r1.amountRemaining) || 0;
+    var rCst = parseFloat(r1.revenue) || 0;
+    var isPaidR = String(r1.paid || '').trim() === 'نعم';
+    var rRem = parseFloat(r1.amountRemaining);
+    if(isNaN(rRem)) rRem = Math.max(0, rCst - (parseFloat(r1.amountPaid)||0));
+
+    var rPending = 0;
+    if(!isPaidR) rPending = rRem > 0 ? rRem : rCst;
+
+    rRev += rCst;
+    rColl += isPaidR ? rCst : Math.max(0, rCst - rPending);
+    rPend += rPending;
   }
 
   fColl = parseFloat(fColl.toFixed(2));
